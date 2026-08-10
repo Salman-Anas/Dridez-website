@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, Car, Settings, CreditCard, Navigation, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, Car, Settings, CreditCard, Navigation, LogOut, CheckSquare } from 'lucide-react';
 import { logoutAdmin } from '../utils/auth';
 
 export const Sidebar: React.FC = () => {
@@ -57,6 +57,14 @@ export const Sidebar: React.FC = () => {
         >
           <CreditCard size={20} />
           Payments
+        </NavLink>
+        
+        <NavLink 
+          to="/tasks" 
+          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+        >
+          <CheckSquare size={20} />
+          Tasks
         </NavLink>
         
         <div style={{ flex: 1 }} />

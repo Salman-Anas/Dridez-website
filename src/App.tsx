@@ -10,6 +10,7 @@ import { Settings } from './pages/Settings';
 import { RecoverData } from './pages/RecoverData';
 import { PrivacyPolicy } from './pages/PrivacyPolicy';
 import { Login } from './pages/Login';
+import { Tasks } from './pages/Tasks';
 
 function App() {
   return (
@@ -26,6 +27,7 @@ function App() {
           <Route path="users" element={<Users />} />
           <Route path="payments" element={<Payments />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="tasks" element={<Tasks />} />
         </Route>
       </Routes>
     </BrowserRouter>

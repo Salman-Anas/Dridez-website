@@ -47,7 +47,7 @@ interface DriverDoc {
   carPlate?: string;
 }
 
-type TimePeriod = 'today' | 'week' | 'month' | 'year' | 'all';
+type TimePeriod = 'today' | 'week' | 'month' | 'year' | 'all' | 'custom';
 type CategoryFilter = 'all' | 'received' | 'cancelled' | 'inprocess' | 'customer-balance' | 'driver-balance';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -407,6 +407,8 @@ export const Payments: React.FC = () => {
   const [selectedRide, setSelectedRide] = useState<RideDoc | null>(null);
   const [showCustomerBalance, setShowCustomerBalance] = useState(false);
   const [showDriverBalance, setShowDriverBalance] = useState(false);
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
 
   // ── Data Loading ──────────────────────────────────────────────────────────
 
@@ -493,7 +495,15 @@ export const Payments: React.FC = () => {
 
   const periodRides = rides.filter(r => {
     if (period === 'all') return true;
-    return toMs(r.time) >= periodStart;
+    const tMs = toMs(r.time);
+    if (period === 'custom') {
+      if (!customStartDate || !customEndDate) return true;
+      const start = new Date(customStartDate).getTime();
+      const end = new Date(customEndDate);
+      end.setHours(23, 59, 59, 999);
+      return tMs >= start && tMs <= end.getTime();
+    }
+    return tMs >= periodStart;
   });
 
   const receivedRides = periodRides.filter(r => isCompleted(r.status));
@@ -588,6 +598,7 @@ export const Payments: React.FC = () => {
     { key: 'month', label: 'This Month' },
     { key: 'year', label: 'This Year' },
     { key: 'all', label: 'All Time' },
+    { key: 'custom', label: 'Custom' },
   ];
 
   // ─── Render ────────────────────────────────────────────────────────────────
@@ -615,6 +626,13 @@ export const Payments: React.FC = () => {
             </button>
           ))}
         </div>
+        {period === 'custom' && (
+          <div className="custom-date-filters" style={{ display: 'flex', gap: '0.5rem', marginLeft: '1rem', alignItems: 'center' }}>
+            <input type="date" value={customStartDate} onChange={e => setCustomStartDate(e.target.value)} style={{ padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }} />
+            <span style={{ color: 'var(--text-secondary)' }}>to</span>
+            <input type="date" value={customEndDate} onChange={e => setCustomEndDate(e.target.value)} style={{ padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }} />
+          </div>
+        )}
       </div>
 
       {/* Summary Cards */}

@@ -6,7 +6,7 @@ import {
   Navigation, Clock, CheckCircle, XCircle, AlertCircle,
   Car, Truck, Bike, MapPin, X, User, Phone, Shield,
   Package, Calendar, ChevronRight, Loader, Globe,
-  Activity, Hash
+  Activity, Hash, Filter
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -55,6 +55,7 @@ interface DriverInfo {
 }
 
 type FilterType = 'all' | 'active' | 'pending' | 'completed' | 'cancelled';
+type TimePeriod = 'today' | 'week' | 'month' | 'year' | 'all' | 'custom';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -115,6 +116,17 @@ const getTimestamp = (time: Ride['time']): Date | null => {
   if (typeof time === 'string') return new Date(time);
   if (typeof time === 'object' && 'seconds' in time) return new Date(time.seconds * 1000);
   return null;
+};
+
+const getPeriodStart = (period: TimePeriod): number => {
+  const now = new Date();
+  switch (period) {
+    case 'today': { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime(); }
+    case 'week': { const d = new Date(now); d.setDate(d.getDate() - d.getDay()); d.setHours(0, 0, 0, 0); return d.getTime(); }
+    case 'month': { const d = new Date(now.getFullYear(), now.getMonth(), 1); return d.getTime(); }
+    case 'year': { return new Date(now.getFullYear(), 0, 1).getTime(); }
+    default: return 0;
+  }
 };
 
 const formatTime = (time: Ride['time']): string => {
@@ -350,6 +362,9 @@ export const Rides: React.FC = () => {
   const [rides, setRides] = useState<Ride[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterType>('all');
+  const [period, setPeriod] = useState<TimePeriod>('all');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
   const [selectedRide, setSelectedRide] = useState<Ride | null>(null);
 
   const loadFirestoreRides = useCallback(async (): Promise<Ride[]> => {
@@ -416,15 +431,30 @@ export const Rides: React.FC = () => {
     };
   }, [loadFirestoreRides, loadCitytocityRides]);
 
+  const periodStart = getPeriodStart(period);
+  const periodRides = rides.filter(r => {
+    if (period === 'all') return true;
+    const d = getTimestamp(r.time);
+    const tMs = d ? d.getTime() : 0;
+    if (period === 'custom') {
+      if (!customStartDate || !customEndDate) return true;
+      const start = new Date(customStartDate).getTime();
+      const end = new Date(customEndDate);
+      end.setHours(23, 59, 59, 999);
+      return tMs >= start && tMs <= end.getTime();
+    }
+    return tMs >= periodStart;
+  });
+
   const counts = {
-    all: rides.length,
-    active: rides.filter(r => isActive(normalizeStatus(r.status))).length,
-    pending: rides.filter(r => isPending(normalizeStatus(r.status))).length,
-    completed: rides.filter(r => isCompleted(normalizeStatus(r.status))).length,
-    cancelled: rides.filter(r => isCancelled(normalizeStatus(r.status))).length,
+    all: periodRides.length,
+    active: periodRides.filter(r => isActive(normalizeStatus(r.status))).length,
+    pending: periodRides.filter(r => isPending(normalizeStatus(r.status))).length,
+    completed: periodRides.filter(r => isCompleted(normalizeStatus(r.status))).length,
+    cancelled: periodRides.filter(r => isCancelled(normalizeStatus(r.status))).length,
   };
 
-  const filteredRides = filter === 'all' ? rides : rides.filter(r => {
+  const filteredRides = filter === 'all' ? periodRides : periodRides.filter(r => {
     const s = normalizeStatus(r.status);
     if (filter === 'active') return isActive(s);
     if (filter === 'pending') return isPending(s);
@@ -432,6 +462,15 @@ export const Rides: React.FC = () => {
     if (filter === 'cancelled') return isCancelled(s);
     return true;
   });
+
+  const periods: { key: TimePeriod; label: string }[] = [
+    { key: 'today', label: 'Today' },
+    { key: 'week', label: 'This Week' },
+    { key: 'month', label: 'This Month' },
+    { key: 'year', label: 'This Year' },
+    { key: 'all', label: 'All Time' },
+    { key: 'custom', label: 'Custom' },
+  ];
 
   const filterCards: { key: FilterType; label: string; count: number; color: string; icon: React.ReactNode }[] = [
     { key: 'all',       label: 'All Rides',      count: counts.all,       color: 'var(--accent-blue)',    icon: <Navigation size={22} /> },
@@ -446,6 +485,30 @@ export const Rides: React.FC = () => {
       <div className="dashboard-header" style={{ textAlign: 'left', marginBottom: '2rem' }}>
         <h1>Rides Management</h1>
         <p>Real-time aggregated view across Realtime Database &amp; Firestore</p>
+      </div>
+
+      {/* Time Period Filter */}
+      <div className="pay-period-bar" style={{ marginBottom: '1.5rem' }}>
+        <div className="pay-period-label"><Filter size={15} /> Period</div>
+        <div className="pay-period-tabs">
+          {periods.map(p => (
+            <button
+              key={p.key}
+              className={`pay-period-tab ${period === p.key ? 'active' : ''}`}
+              onClick={() => setPeriod(p.key)}
+            >
+              <Calendar size={13} />
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {period === 'custom' && (
+          <div className="custom-date-filters" style={{ display: 'flex', gap: '0.5rem', marginLeft: '1rem', alignItems: 'center' }}>
+            <input type="date" value={customStartDate} onChange={e => setCustomStartDate(e.target.value)} style={{ padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }} />
+            <span style={{ color: 'var(--text-secondary)' }}>to</span>
+            <input type="date" value={customEndDate} onChange={e => setCustomEndDate(e.target.value)} style={{ padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }} />
+          </div>
+        )}
       </div>
 
       {/* Filter Cards */}

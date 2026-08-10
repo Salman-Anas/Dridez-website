@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { collection, getDocs, getCountFromServer, query, where } from 'firebase/firestore';
 import { ref, onValue, off } from 'firebase/database';
 import { db, rtdb } from '../firebase';
@@ -89,6 +90,7 @@ const initialState: StatsState = {
 
 export const Dashboard: React.FC = () => {
   const [stats, setStats] = useState<StatsState>(initialState);
+  const navigate = useNavigate();
 
   useEffect(() => {
     let mounted = true;
@@ -250,44 +252,45 @@ export const Dashboard: React.FC = () => {
 
       {/* ── Users ─────────────────────────────────────────────────────── */}
       <div className="stat-section">
-        <h2 className="section-title"><Users size={20} /> Users Overview</h2>
+        <h2 className="section-title section-title-link" onClick={() => navigate('/users')}><Users size={20} /> Users Overview <span className="section-nav-arrow">→</span></h2>
         <div className="stats-grid">
-          <StatCard title="Total Customers"  value={stats.users.total}      icon={<Users />}       color="var(--accent-blue)" />
-          <StatCard title="Android Users"    value={stats.users.android}    icon={<Smartphone />}  color="var(--accent-green)" />
-          <StatCard title="iOS Users"        value={stats.users.ios}        icon={<Smartphone />}  color="var(--accent-purple)" />
-          <StatCard title="Verified Users"   value={stats.users.verified}   icon={<ShieldCheck />} color="var(--accent-green)" />
-          <StatCard title="Unverified Users" value={stats.users.unverified} icon={<ShieldAlert />} color="var(--accent-orange)" />
+          <StatCard title="Total Customers"  value={stats.users.total}      icon={<Users />}       color="var(--accent-blue)"   onClick={() => navigate('/users')} />
+          <StatCard title="Android Users"    value={stats.users.android}    icon={<Smartphone />}  color="var(--accent-green)"  onClick={() => navigate('/users')} />
+          <StatCard title="iOS Users"        value={stats.users.ios}        icon={<Smartphone />}  color="var(--accent-purple)" onClick={() => navigate('/users')} />
+          <StatCard title="Verified Users"   value={stats.users.verified}   icon={<ShieldCheck />} color="var(--accent-green)"  onClick={() => navigate('/users')} />
+          <StatCard title="Unverified Users" value={stats.users.unverified} icon={<ShieldAlert />} color="var(--accent-orange)" onClick={() => navigate('/users')} />
         </div>
       </div>
 
       {/* ── Drivers ───────────────────────────────────────────────────── */}
       <div className="stat-section">
-        <h2 className="section-title"><Car size={20} /> Drivers Overview</h2>
+        <h2 className="section-title section-title-link" onClick={() => navigate('/drivers')}><Car size={20} /> Drivers Overview <span className="section-nav-arrow">→</span></h2>
         <div className="stats-grid">
-          <StatCard title="Total Drivers"       value={stats.drivers.total}      icon={<Car />}        color="var(--accent-purple)" />
-          <StatCard title="Verified Drivers"    value={stats.drivers.verified}   icon={<ShieldCheck />}color="var(--accent-green)" />
-          <StatCard title="Unverified Drivers"  value={stats.drivers.unverified} icon={<ShieldAlert />}color="var(--accent-orange)" />
-          <StatCard title="Freight-Enabled"     value={stats.drivers.freight}    icon={<Truck />}      color="var(--accent-red)" />
-          <StatCard title="Standard Drivers"    value={stats.drivers.nonFreight} icon={<Bike />}       color="var(--accent-blue)" />
+          <StatCard title="Total Drivers"       value={stats.drivers.total}      icon={<Car />}        color="var(--accent-purple)" onClick={() => navigate('/drivers')} />
+          <StatCard title="Verified Drivers"    value={stats.drivers.verified}   icon={<ShieldCheck />}color="var(--accent-green)"  onClick={() => navigate('/drivers')} />
+          <StatCard title="Unverified Drivers"  value={stats.drivers.unverified} icon={<ShieldAlert />}color="var(--accent-orange)" onClick={() => navigate('/drivers')} />
+          <StatCard title="Freight-Enabled"     value={stats.drivers.freight}    icon={<Truck />}      color="var(--accent-red)"    onClick={() => navigate('/drivers')} />
+          <StatCard title="Standard Drivers"    value={stats.drivers.nonFreight} icon={<Bike />}       color="var(--accent-blue)"   onClick={() => navigate('/drivers')} />
         </div>
       </div>
 
       {/* ── Trips ─────────────────────────────────────────────────────── */}
       <div className="stat-section">
-        <h2 className="section-title"><Navigation size={20} /> Trips Overview</h2>
+        <h2 className="section-title section-title-link" onClick={() => navigate('/rides')}><Navigation size={20} /> Trips Overview <span className="section-nav-arrow">→</span></h2>
         <div className="stats-grid">
-          <StatCard title="Total Rides"       value={stats.trips.total}     icon={<Navigation />}   color="var(--accent-blue)" />
-          <StatCard title="Active Right Now"  value={stats.trips.active}    icon={<Activity />}     color="var(--accent-cyan)" />
-          <StatCard title="Pending / Queued"  value={stats.trips.pending}   icon={<Clock />}        color="var(--accent-orange)" />
-          <StatCard title="Completed Rides"   value={stats.trips.completed} icon={<CheckCircle />}  color="var(--accent-green)" />
-          <StatCard title="Cancelled Rides"   value={stats.trips.cancelled} icon={<XCircle />}      color="var(--accent-red)" />
-          <StatCard title="Today's Rides"     value={stats.trips.today}     icon={<CalendarCheck />}color="var(--accent-purple)" />
-          <StatCard title="Inter-City Trips"  value={stats.trips.intercity} icon={<Globe />}        color="var(--accent-cyan)" />
+          <StatCard title="Total Rides"       value={stats.trips.total}     icon={<Navigation />}   color="var(--accent-blue)"   onClick={() => navigate('/rides')} />
+          <StatCard title="Active Right Now"  value={stats.trips.active}    icon={<Activity />}     color="var(--accent-cyan)"   onClick={() => navigate('/rides')} />
+          <StatCard title="Pending / Queued"  value={stats.trips.pending}   icon={<Clock />}        color="var(--accent-orange)" onClick={() => navigate('/rides')} />
+          <StatCard title="Completed Rides"   value={stats.trips.completed} icon={<CheckCircle />}  color="var(--accent-green)"  onClick={() => navigate('/rides')} />
+          <StatCard title="Cancelled Rides"   value={stats.trips.cancelled} icon={<XCircle />}      color="var(--accent-red)"    onClick={() => navigate('/rides')} />
+          <StatCard title="Today's Rides"     value={stats.trips.today}     icon={<CalendarCheck />}color="var(--accent-purple)" onClick={() => navigate('/rides')} />
+          <StatCard title="Inter-City Trips"  value={stats.trips.intercity} icon={<Globe />}        color="var(--accent-cyan)"   onClick={() => navigate('/rides')} />
           <StatCard
             title="Total Revenue (Completed)"
             value={stats.trips.revenue !== null ? `Rs. ${stats.trips.revenue.toLocaleString()}` : null}
             icon={<DollarSign />}
             color="var(--accent-green)"
+            onClick={() => navigate('/payments')}
           />
         </div>
       </div>
@@ -295,19 +298,21 @@ export const Dashboard: React.FC = () => {
       {/* ── Revenue breakdown (quick ratio) ───────────────────────────── */}
       {stats.trips.completed !== null && stats.trips.total !== null && stats.trips.total > 0 && (
         <div className="stat-section">
-          <h2 className="section-title"><TrendingUp size={20} /> Ride Performance</h2>
+          <h2 className="section-title section-title-link" onClick={() => navigate('/rides')}><TrendingUp size={20} /> Ride Performance <span className="section-nav-arrow">→</span></h2>
           <div className="stats-grid">
             <StatCard
               title="Completion Rate"
               value={`${((stats.trips.completed / Math.max(1, stats.trips.total - (stats.trips.active ?? 0) - (stats.trips.pending ?? 0))) * 100).toFixed(1)}%`}
               icon={<TrendingUp />}
               color="var(--accent-green)"
+              onClick={() => navigate('/rides')}
             />
             <StatCard
               title="Cancellation Rate"
               value={`${((stats.trips.cancelled ?? 0) / Math.max(1, stats.trips.total - (stats.trips.active ?? 0) - (stats.trips.pending ?? 0)) * 100).toFixed(1)}%`}
               icon={<XCircle />}
               color="var(--accent-red)"
+              onClick={() => navigate('/rides')}
             />
             <StatCard
               title="Avg Fare (Completed)"
@@ -316,6 +321,7 @@ export const Dashboard: React.FC = () => {
                 : null}
               icon={<DollarSign />}
               color="var(--accent-purple)"
+              onClick={() => navigate('/payments')}
             />
           </div>
         </div>
@@ -323,11 +329,11 @@ export const Dashboard: React.FC = () => {
 
       {/* ── Complaints ────────────────────────────────────────────────── */}
       <div className="stat-section">
-        <h2 className="section-title"><MessageSquare size={20} /> Support &amp; Feedback</h2>
+        <h2 className="section-title section-title-link" onClick={() => navigate('/tasks')}><MessageSquare size={20} /> Support &amp; Feedback <span className="section-nav-arrow">→</span></h2>
         <div className="stats-grid">
-          <StatCard title="Total Tickets"  value={stats.complaints.total}  icon={<AlertCircle />}  color="var(--accent-red)" />
-          <StatCard title="Open Tickets"   value={stats.complaints.open}   icon={<AlertCircle />}  color="var(--accent-orange)" />
-          <StatCard title="Closed Tickets" value={stats.complaints.closed} icon={<CheckCircle />}  color="var(--accent-green)" />
+          <StatCard title="Total Tickets"  value={stats.complaints.total}  icon={<AlertCircle />}  color="var(--accent-red)"    onClick={() => navigate('/tasks')} />
+          <StatCard title="Open Tickets"   value={stats.complaints.open}   icon={<AlertCircle />}  color="var(--accent-orange)" onClick={() => navigate('/tasks')} />
+          <StatCard title="Closed Tickets" value={stats.complaints.closed} icon={<CheckCircle />}  color="var(--accent-green)" onClick={() => navigate('/tasks')} />
         </div>
       </div>
 
