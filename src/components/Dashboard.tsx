@@ -4,6 +4,8 @@ import { collection, getDocs, getCountFromServer, query, where } from 'firebase/
 import { ref, onValue, off } from 'firebase/database';
 import { db, rtdb } from '../firebase';
 import { StatCard } from './StatCard';
+import { getPlatform, getVerification, type UserSchemaFields } from '../utils/userSchema';
+import { getStatus, isFreight, type DriverApplicationFields } from '../utils/driverSchema';
 import {
   Users, Smartphone, ShieldCheck, ShieldAlert,
   Car, Bike, Truck, Navigation, CheckCircle, XCircle,
@@ -43,6 +45,9 @@ interface RideDoc {
   time?: unknown;
 }
 
+/** Only the fields the dashboard tallies — see Users.tsx for the full shape. */
+type UserDoc = UserSchemaFields;
+
 /** Safely coerce any Firebase value to a real number (prevents string concatenation). */
 const toNum = (v: unknown): number => { const n = Number(v); return isNaN(n) ? 0 : n; };
 
@@ -53,6 +58,7 @@ interface StatsState {
     ios: number | null;
     verified: number | null;
     unverified: number | null;
+    pending: number | null;
   };
   drivers: {
     total: number | null;
@@ -80,7 +86,7 @@ interface StatsState {
 }
 
 const initialState: StatsState = {
-  users:     { total: null, android: null, ios: null, verified: null, unverified: null },
+  users:     { total: null, android: null, ios: null, verified: null, unverified: null, pending: null },
   drivers:   { total: null, verified: null, unverified: null, freight: null, nonFreight: null },
   trips:     { total: null, active: null, pending: null, completed: null, cancelled: null, today: null, intercity: null, revenue: null, avgFare: null },
   complaints:{ total: null, open: null, closed: null },
@@ -95,53 +101,50 @@ export const Dashboard: React.FC = () => {
   useEffect(() => {
     let mounted = true;
 
-    // ── 1. Users (Firestore getCountFromServer – cheapest path) ──────────────
+    // ── 1. Users ─────────────────────────────────────────────────────────────
+    // Read the docs and tally in JS: platform lives in `devicePlatform` on new
+    // documents but older ones only carry `os`, and verification moved from the
+    // `isVerified` boolean to the `verificationStatus` string. Counting locally
+    // resolves both shapes without double-counting mid-migration documents.
     const fetchUsers = async () => {
       try {
-        const ref = collection(db, 'users');
-        const [total, android, ios, verified, unverified] = await Promise.all([
-          getCountFromServer(ref),
-          getCountFromServer(query(ref, where('os', '==', 'android'))),
-          getCountFromServer(query(ref, where('os', '==', 'ios'))),
-          getCountFromServer(query(ref, where('isVerified', '==', true))),
-          getCountFromServer(query(ref, where('isVerified', '==', false))),
-        ]);
+        const snap = await getDocs(collection(db, 'users'));
         if (!mounted) return;
+        const docs: UserDoc[] = [];
+        snap.forEach(d => docs.push(d.data() as UserDoc));
         setStats(p => ({
           ...p,
           users: {
-            total:      total.data().count,
-            android:    android.data().count,
-            ios:        ios.data().count,
-            verified:   verified.data().count,
-            unverified: unverified.data().count,
+            total:      docs.length,
+            android:    docs.filter(u => getPlatform(u) === 'android').length,
+            ios:        docs.filter(u => getPlatform(u) === 'ios').length,
+            verified:   docs.filter(u => getVerification(u) === 'verified').length,
+            unverified: docs.filter(u => getVerification(u) !== 'verified').length,
+            pending:    docs.filter(u => getVerification(u) === 'pending').length,
           }
         }));
       } catch (e) { console.warn('Users stats error', e); }
     };
 
-    // ── 2. Drivers (Firestore – use schema-correct fields) ───────────────────
-    // Schema: isVerified (boolean), freight (boolean), driver (string)
+    // ── 2. Drivers ────────────────────────────────────────────────
+    // Tallied in JS like the users block above: approval moved from the
+    // `isVerified` boolean to the `status` string, and a `where(isVerified)`
+    // count silently skips the new documents that carry no such field.
     const fetchDrivers = async () => {
       try {
-        const ref = collection(db, 'driverProfileRequests');
-        const [total, verified, unverified, freightYes] = await Promise.all([
-          getCountFromServer(ref),
-          getCountFromServer(query(ref, where('isVerified', '==', true))),
-          getCountFromServer(query(ref, where('isVerified', '==', false))),
-          getCountFromServer(query(ref, where('freight', '==', true))),
-        ]);
+        const snap = await getDocs(collection(db, 'driverProfileRequests'));
         if (!mounted) return;
-        const tot = total.data().count;
-        const frgt = freightYes.data().count;
+        const docs: DriverApplicationFields[] = [];
+        snap.forEach(d => docs.push(d.data() as DriverApplicationFields));
+        const frgt = docs.filter(isFreight).length;
         setStats(p => ({
           ...p,
           drivers: {
-            total:      tot,
-            verified:   verified.data().count,
-            unverified: unverified.data().count,
+            total:      docs.length,
+            verified:   docs.filter(d => getStatus(d) === 'approved').length,
+            unverified: docs.filter(d => getStatus(d) !== 'approved').length,
             freight:    frgt,
-            nonFreight: Math.max(0, tot - frgt),
+            nonFreight: Math.max(0, docs.length - frgt),
           }
         }));
       } catch (e) { console.warn('Drivers stats error', e); }
@@ -255,10 +258,11 @@ export const Dashboard: React.FC = () => {
         <h2 className="section-title section-title-link" onClick={() => navigate('/users')}><Users size={20} /> Users Overview <span className="section-nav-arrow">→</span></h2>
         <div className="stats-grid">
           <StatCard title="Total Customers"  value={stats.users.total}      icon={<Users />}       color="var(--accent-blue)"   onClick={() => navigate('/users')} />
-          <StatCard title="Android Users"    value={stats.users.android}    icon={<Smartphone />}  color="var(--accent-green)"  onClick={() => navigate('/users')} />
-          <StatCard title="iOS Users"        value={stats.users.ios}        icon={<Smartphone />}  color="var(--accent-purple)" onClick={() => navigate('/users')} />
-          <StatCard title="Verified Users"   value={stats.users.verified}   icon={<ShieldCheck />} color="var(--accent-green)"  onClick={() => navigate('/users')} />
-          <StatCard title="Unverified Users" value={stats.users.unverified} icon={<ShieldAlert />} color="var(--accent-orange)" onClick={() => navigate('/users')} />
+          <StatCard title="Android Users"    value={stats.users.android}    icon={<Smartphone />}  color="var(--accent-green)"  onClick={() => navigate('/users?filter=android')} />
+          <StatCard title="iOS Users"        value={stats.users.ios}        icon={<Smartphone />}  color="var(--accent-purple)" onClick={() => navigate('/users?filter=ios')} />
+          <StatCard title="Verified Users"   value={stats.users.verified}   icon={<ShieldCheck />} color="var(--accent-green)"  onClick={() => navigate('/users?filter=verified')} />
+          <StatCard title="Unverified Users" value={stats.users.unverified} icon={<ShieldAlert />} color="var(--accent-orange)" onClick={() => navigate('/users?filter=unverified')} />
+          <StatCard title="Awaiting Review"  value={stats.users.pending}    icon={<Clock />}       color="var(--accent-cyan)"   onClick={() => navigate('/users?filter=unverified')} />
         </div>
       </div>
 

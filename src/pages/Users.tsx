@@ -1,21 +1,62 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { useSearchParams } from 'react-router-dom';
+import {
+  collection, getDocs, query, where, doc, updateDoc,
+  orderBy, limit, serverTimestamp
+} from 'firebase/firestore';
 import { db } from '../firebase';
 import {
-  User, Smartphone, Shield, ShieldAlert, X, Navigation,
-  CheckCircle, XCircle, Clock, Activity, DollarSign,
-  Loader, ChevronRight, MapPin, Hash
+  getPlatform, getVerification, platformLabel,
+  type Platform, type Verification,
+} from '../utils/userSchema';
+import {
+  User, Smartphone, Shield, ShieldCheck, ShieldAlert, ShieldX, X, Navigation,
+  CheckCircle, XCircle, Clock, Activity, DollarSign, Mail, Phone,
+  Loader, ChevronRight, MapPin, Hash, CreditCard, Calendar, LogIn,
+  Image as ImageIcon, Search, Monitor, RotateCcw, UserCheck, Info
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+type FireTime = number | string | { seconds: number } | null | undefined;
 
 interface UserProfile {
   id: string;
   uid?: string;
   name?: string;
   phone?: string;
+  email?: string;
+  emailVerified?: boolean;
+  cnic?: string;
+  accountType?: string;
+  verificationStatus?: string;
+  idCardFrontUrl?: string;
+  idCardBackUrl?: string;
+  devicePlatform?: string;
+  devicePlatformVersion?: string;
+  lastLoginPlatform?: string;
+  lastLoginDevice?: string;
+  lastLoginAt?: FireTime;
+  createdAt?: FireTime;
+  detailsSubmittedAt?: FireTime;
+  loginCount?: number;
+  /** Legacy fields kept so older documents still render correctly. */
   os?: string;
   isVerified?: boolean;
+}
+
+interface LoginRecord {
+  id: string;
+  at?: FireTime;
+  event?: string;
+  method?: string;
+  platform?: string;
+  osVersion?: string;
+  appVersion?: string;
+  device?: string;
+  brand?: string;
+  model?: string;
+  manufacturer?: string;
 }
 
 interface RideRecord {
@@ -25,7 +66,7 @@ interface RideRecord {
   dropoff?: unknown;
   price?: unknown;
   distance?: unknown;
-  time?: number | string | { seconds: number };
+  time?: FireTime;
   cabtype?: string;
 }
 
@@ -91,20 +132,57 @@ const extractCoords = (loc: unknown): { lat: number; lng: number } | null => {
 
 const toNum = (v: unknown): number => { const n = Number(v); return isNaN(n) ? 0 : n; };
 
-const fmtTime = (t: RideRecord['time']): string => {
-  if (!t) return '—';
-  let d: Date;
-  if (typeof t === 'number') d = new Date(t > 1e12 ? t : t * 1000);
-  else if (typeof t === 'string') d = new Date(t);
-  else if (typeof t === 'object' && 'seconds' in t) d = new Date(t.seconds * 1000);
-  else return '—';
-  return d.toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' });
+const toMs = (t: FireTime): number => {
+  if (!t) return 0;
+  if (typeof t === 'number') return t > 1e12 ? t : t * 1000;
+  if (typeof t === 'string') { const d = Date.parse(t); return isNaN(d) ? 0 : d; }
+  if (typeof t === 'object' && 'seconds' in t) return t.seconds * 1000;
+  return 0;
+};
+
+const fmtTime = (t: FireTime): string => {
+  const ms = toMs(t);
+  if (!ms) return '—';
+  return new Date(ms).toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' });
+};
+
+/** "3 days ago" style label next to an absolute timestamp. */
+const fmtRelative = (t: FireTime): string => {
+  const ms = toMs(t);
+  if (!ms) return '';
+  const diff = Date.now() - ms;
+  const mins = Math.round(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  return `${Math.round(days / 30)}mo ago`;
+};
+
+/** Format a raw 13-digit CNIC as 00000-0000000-0. */
+const fmtCnic = (cnic?: string): string => {
+  const digits = (cnic || '').replace(/\D/g, '');
+  if (digits.length !== 13) return cnic || '—';
+  return `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12)}`;
+};
+
+// ─── Verification badge styling ──────────────────────────────────────────────
+
+const VERIFY_META: Record<Verification, { label: string; cls: string; Icon: typeof Shield }> = {
+  verified:   { label: 'Verified',   cls: 'vs-verified',   Icon: ShieldCheck },
+  pending:    { label: 'Pending',    cls: 'vs-pending',    Icon: Clock },
+  rejected:   { label: 'Rejected',   cls: 'vs-rejected',   Icon: ShieldX },
+  unverified: { label: 'Unverified', cls: 'vs-unverified', Icon: ShieldAlert },
 };
 
 const isCompleted = (s?: string) => ['completed', 'finished', 'done'].includes((s || '').toLowerCase());
 const isCancelled = (s?: string) => ['cancelled', 'canceled', 'rejected'].includes((s || '').toLowerCase());
 const isActive    = (s?: string) => ['ongoing', 'started', 'active', 'accepted'].includes((s || '').toLowerCase());
 const isPending   = (s?: string) => ['pending', 'searching', 'waiting'].includes((s || '').toLowerCase());
+
+// ─── Small presentational pieces ─────────────────────────────────────────────
 
 const StatusPill: React.FC<{ status?: string }> = ({ status }) => {
   const s = (status || 'unknown').toLowerCase();
@@ -118,13 +196,77 @@ const StatusPill: React.FC<{ status?: string }> = ({ status }) => {
   return <span className={cls}>{label}</span>;
 };
 
-// ─── User History Drawer ─────────────────────────────────────────────────────
+const PlatformBadge: React.FC<{ platform: Platform }> = ({ platform }) => (
+  <span className={`platform-badge pb-${platform}`}>
+    <Smartphone size={11} /> {platformLabel(platform)}
+  </span>
+);
 
-const UserHistoryDrawer: React.FC<{ user: UserProfile; onClose: () => void }> = ({ user, onClose }) => {
+const VerifyBadge: React.FC<{ state: Verification; small?: boolean }> = ({ state, small }) => {
+  const { label, cls, Icon } = VERIFY_META[state];
+  return (
+    <span className={`verify-badge ${cls}${small ? ' vb-sm' : ''}`}>
+      <Icon size={small ? 10 : 12} /> {label}
+    </span>
+  );
+};
+
+/** One labelled field inside the details grid. */
+const Detail: React.FC<{
+  icon?: React.ReactNode; label: string; value?: React.ReactNode; mono?: boolean; full?: boolean;
+}> = ({ icon, label, value, mono, full }) => (
+  <div className="detail-item" style={full ? { gridColumn: '1 / -1' } : undefined}>
+    <span className="di-label">{icon} {label}</span>
+    <span className={`di-value${mono ? ' mono' : ''}`}>{value || '—'}</span>
+  </div>
+);
+
+/** ID-card thumbnail — click opens the full-size lightbox. */
+const IdCardThumb: React.FC<{ src?: string; label: string; onOpen: (src: string) => void }> = ({ src, label, onOpen }) => {
+  const [err, setErr] = useState(false);
+  if (!src || err) {
+    return (
+      <div className="dv-photo-box dv-photo-empty">
+        <ImageIcon size={20} />
+        <span>{label} — not uploaded</span>
+      </div>
+    );
+  }
+  return (
+    <button type="button" className="dv-photo-box id-photo-box" onClick={() => onOpen(src)} title={`View ${label}`}>
+      <img src={src} alt={label} onError={() => setErr(true)} referrerPolicy="no-referrer" />
+      <span>{label}</span>
+    </button>
+  );
+};
+
+const Lightbox: React.FC<{ src: string; onClose: () => void }> = ({ src, onClose }) => (
+  <div className="lightbox-overlay" onClick={onClose}>
+    <button className="lightbox-close" onClick={onClose}><X size={22} /></button>
+    <img src={src} alt="Document" className="lightbox-img" onClick={e => e.stopPropagation()} referrerPolicy="no-referrer" />
+    <a href={src} target="_blank" rel="noopener noreferrer" className="lightbox-link" onClick={e => e.stopPropagation()}>
+      Open original in new tab
+    </a>
+  </div>
+);
+
+// ─── User Detail Drawer ──────────────────────────────────────────────────────
+
+const UserHistoryDrawer: React.FC<{
+  user: UserProfile;
+  onClose: () => void;
+  onSetStatus: (id: string, status: Verification) => Promise<void>;
+}> = ({ user, onClose, onSetStatus }) => {
   const [rides, setRides] = useState<RideRecord[]>([]);
+  const [logins, setLogins] = useState<LoginRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingLogins, setLoadingLogins] = useState(true);
+  const [working, setWorking] = useState<Verification | null>(null);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   const uid = user.uid || user.id;
+  const platform = getPlatform(user);
+  const verification = getVerification(user);
 
   useEffect(() => {
     const fetchRides = async () => {
@@ -134,16 +276,7 @@ const UserHistoryDrawer: React.FC<{ user: UserProfile; onClose: () => void }> = 
         const snap = await getDocs(q);
         const list: RideRecord[] = [];
         snap.forEach(d => list.push({ id: d.id, ...d.data() } as RideRecord));
-        // Debug: log first ride's pickup to DevTools so we can see the real Firebase shape
-        if (list.length > 0) {
-          console.log('[UserHistoryDrawer] first ride pickup:', list[0].pickup, '| dropoff:', list[0].dropoff);
-        }
-        // sort newest first
-        list.sort((a, b) => {
-          const ta = typeof a.time === 'number' ? a.time : typeof a.time === 'object' && a.time && 'seconds' in a.time ? a.time.seconds * 1000 : 0;
-          const tb = typeof b.time === 'number' ? b.time : typeof b.time === 'object' && b.time && 'seconds' in b.time ? b.time.seconds * 1000 : 0;
-          return tb - ta;
-        });
+        list.sort((a, b) => toMs(b.time) - toMs(a.time));
         setRides(list);
       } catch {
         setRides([]);
@@ -154,12 +287,47 @@ const UserHistoryDrawer: React.FC<{ user: UserProfile; onClose: () => void }> = 
     fetchRides();
   }, [uid]);
 
+  // loginHistory lives as a subcollection under the user document
+  useEffect(() => {
+    const fetchLogins = async () => {
+      setLoadingLogins(true);
+      try {
+        const ref = collection(db, 'users', user.id, 'loginHistory');
+        let list: LoginRecord[] = [];
+        try {
+          const snap = await getDocs(query(ref, orderBy('at', 'desc'), limit(30)));
+          snap.forEach(d => list.push({ id: d.id, ...d.data() } as LoginRecord));
+        } catch {
+          // Documents missing the `at` field are skipped by orderBy — fall back to a plain read
+          const snap = await getDocs(ref);
+          snap.forEach(d => list.push({ id: d.id, ...d.data() } as LoginRecord));
+          list.sort((a, b) => toMs(b.at) - toMs(a.at));
+          list = list.slice(0, 30);
+        }
+        setLogins(list);
+      } catch {
+        setLogins([]);
+      } finally {
+        setLoadingLogins(false);
+      }
+    };
+    fetchLogins();
+  }, [user.id]);
+
   const totalSpending = rides
     .filter(r => isCompleted(r.status))
     .reduce((sum, r) => sum + toNum(r.price), 0);
 
   const completedCount = rides.filter(r => isCompleted(r.status)).length;
   const cancelledCount = rides.filter(r => isCancelled(r.status)).length;
+
+  const hasDocs = Boolean(user.idCardFrontUrl || user.idCardBackUrl);
+
+  const act = async (status: Verification) => {
+    setWorking(status);
+    await onSetStatus(user.id, status);
+    setWorking(null);
+  };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -173,34 +341,130 @@ const UserHistoryDrawer: React.FC<{ user: UserProfile; onClose: () => void }> = 
             <div>
               <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--text-primary)' }}>{user.name || 'Unnamed User'}</div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{user.phone || '—'}</div>
+              <div className="user-card-meta" style={{ marginTop: '0.35rem' }}>
+                <PlatformBadge platform={platform} />
+                <VerifyBadge state={verification} small />
+              </div>
             </div>
           </div>
           <button className="modal-close-btn" onClick={onClose}><X size={20} /></button>
         </div>
 
         <div className="modal-body">
-          {/* User Info */}
+          {/* ── Identity documents & verification ── */}
           <div className="modal-section">
-            <h3 className="modal-section-title"><User size={16} /> Profile</h3>
+            <h3 className="modal-section-title"><CreditCard size={16} /> Identity Documents</h3>
+            <div className="modal-details-grid" style={{ marginBottom: '0.9rem' }}>
+              <Detail icon={<CreditCard size={11} />} label="CNIC" value={fmtCnic(user.cnic)} />
+              <Detail
+                icon={<Calendar size={11} />}
+                label="Details Submitted"
+                value={user.detailsSubmittedAt ? fmtTime(user.detailsSubmittedAt) : 'Not submitted'}
+              />
+            </div>
+            <div className="dv-photo-row">
+              <IdCardThumb src={user.idCardFrontUrl} label="ID Card — Front" onOpen={setLightbox} />
+              <IdCardThumb src={user.idCardBackUrl}  label="ID Card — Back"  onOpen={setLightbox} />
+            </div>
+            {!hasDocs && (
+              <p className="verify-hint"><Info size={12} /> This user has not uploaded any ID documents yet.</p>
+            )}
+          </div>
+
+          {/* ── Account ── */}
+          <div className="modal-section">
+            <h3 className="modal-section-title"><User size={16} /> Account</h3>
             <div className="modal-details-grid">
-              <div className="detail-item">
-                <span className="di-label"><Smartphone size={11} /> OS</span>
-                <span className="di-value">{user.os || '—'}</span>
-              </div>
-              <div className="detail-item">
-                <span className="di-label"><Shield size={11} /> Verified</span>
-                <span className={`di-value ${user.isVerified ? 'text-green' : 'text-orange'}`}>
-                  {user.isVerified ? 'Yes' : 'No'}
-                </span>
-              </div>
-              <div className="detail-item" style={{ gridColumn: '1 / -1' }}>
-                <span className="di-label"><Hash size={11} /> UID</span>
-                <span className="di-value mono">{uid}</span>
-              </div>
+              <Detail icon={<User size={11} />} label="Full Name" value={user.name} />
+              <Detail icon={<Phone size={11} />} label="Phone" value={user.phone} />
+              <Detail
+                icon={<Mail size={11} />}
+                label="Email"
+                full
+                value={user.email ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    {user.email}
+                    <span className={user.emailVerified ? 'text-green' : 'text-orange'} style={{ fontSize: '0.72rem', fontWeight: 600 }}>
+                      {user.emailVerified ? '✓ verified' : '! unverified'}
+                    </span>
+                  </span>
+                ) : undefined}
+              />
+              <Detail icon={<UserCheck size={11} />} label="Account Type" value={user.accountType} />
+              <Detail
+                icon={<Shield size={11} />}
+                label="Verification"
+                value={<VerifyBadge state={verification} small />}
+              />
+              <Detail
+                icon={<Calendar size={11} />}
+                label="Registered"
+                value={user.createdAt ? `${fmtTime(user.createdAt)} (${fmtRelative(user.createdAt)})` : undefined}
+                full
+              />
+              <Detail icon={<Hash size={11} />} label="UID" value={uid} mono full />
             </div>
           </div>
 
-          {/* Spending Summary */}
+          {/* ── Device & sessions ── */}
+          <div className="modal-section">
+            <h3 className="modal-section-title"><Smartphone size={16} /> Device &amp; Sessions</h3>
+            <div className="modal-details-grid">
+              <Detail icon={<Smartphone size={11} />} label="Platform" value={<PlatformBadge platform={platform} />} />
+              <Detail icon={<Hash size={11} />} label="Platform Version" value={user.devicePlatformVersion} />
+              <Detail icon={<Monitor size={11} />} label="Last Login Device" value={user.lastLoginDevice} />
+              <Detail icon={<LogIn size={11} />} label="Login Count" value={user.loginCount != null ? String(user.loginCount) : undefined} />
+              <Detail
+                icon={<Clock size={11} />}
+                label="Last Login"
+                value={user.lastLoginAt ? `${fmtTime(user.lastLoginAt)} (${fmtRelative(user.lastLoginAt)})` : undefined}
+                full
+              />
+            </div>
+          </div>
+
+          {/* ── Login history (subcollection) ── */}
+          <div className="modal-section">
+            <h3 className="modal-section-title"><LogIn size={16} /> Login History</h3>
+            {loadingLogins ? (
+              <div className="loading-row"><Loader size={14} className="spin" /> Loading sessions…</div>
+            ) : logins.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '1.2rem 0', color: 'var(--text-secondary)' }}>
+                <LogIn size={26} style={{ opacity: 0.3 }} />
+                <p style={{ margin: '0.4rem 0 0' }}>No login history recorded.</p>
+              </div>
+            ) : (
+              <div className="login-history-list">
+                {logins.map(l => {
+                  const lp = (l.platform || '').toLowerCase().includes('ios') ? 'ios'
+                    : (l.platform || '').toLowerCase().includes('android') ? 'android' : 'unknown';
+                  return (
+                    <div key={l.id} className="login-row">
+                      <div className={`login-row-icon lr-${lp}`}><Smartphone size={14} /></div>
+                      <div className="login-row-body">
+                        <div className="login-row-top">
+                          <span className="login-event">{l.event || 'login'}</span>
+                          {l.method && <span className="login-method">{l.method.replace(/_/g, ' ')}</span>}
+                        </div>
+                        <div className="login-row-sub">
+                          {l.device || [l.manufacturer, l.model].filter(Boolean).join(' ') || 'Unknown device'}
+                          {l.platform ? ` · ${platformLabel(lp)}` : ''}
+                          {l.osVersion ? ` ${l.osVersion}` : ''}
+                          {l.appVersion ? ` · app v${l.appVersion}` : ''}
+                        </div>
+                      </div>
+                      <div className="login-row-time">
+                        <span>{fmtTime(l.at)}</span>
+                        <span className="lr-rel">{fmtRelative(l.at)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* ── Spending summary ── */}
           <div className="modal-section">
             <h3 className="modal-section-title"><DollarSign size={16} /> Spending Summary</h3>
             {loading ? (
@@ -231,7 +495,7 @@ const UserHistoryDrawer: React.FC<{ user: UserProfile; onClose: () => void }> = 
             )}
           </div>
 
-          {/* Ride History */}
+          {/* ── Ride history ── */}
           <div className="modal-section">
             <h3 className="modal-section-title"><Activity size={16} /> Ride History</h3>
             {loading ? (
@@ -284,19 +548,64 @@ const UserHistoryDrawer: React.FC<{ user: UserProfile; onClose: () => void }> = 
               </div>
             )}
           </div>
+
+          {/* ── Verification actions ── */}
+          <div className="verify-action-bar">
+            {verification !== 'verified' ? (
+              <>
+                <button className="dv-verify-btn" onClick={() => act('verified')} disabled={working !== null}>
+                  {working === 'verified'
+                    ? <><Loader size={16} className="spin" /> Verifying…</>
+                    : <><ShieldCheck size={16} /> Approve &amp; Verify User</>}
+                </button>
+                {verification !== 'rejected' && (
+                  <button className="dv-reject-btn" onClick={() => act('rejected')} disabled={working !== null}>
+                    {working === 'rejected'
+                      ? <><Loader size={16} className="spin" /> Rejecting…</>
+                      : <><ShieldX size={16} /> Reject</>}
+                  </button>
+                )}
+              </>
+            ) : (
+              <button className="dv-revoke-btn" onClick={() => act('unverified')} disabled={working !== null}>
+                {working === 'unverified'
+                  ? <><Loader size={16} className="spin" /> Revoking…</>
+                  : <><RotateCcw size={16} /> Revoke Verification</>}
+              </button>
+            )}
+          </div>
+          {!hasDocs && verification !== 'verified' && (
+            <p className="verify-hint" style={{ justifyContent: 'center' }}>
+              <Info size={12} /> Review the ID documents above before approving.
+            </p>
+          )}
         </div>
       </div>
+
+      {lightbox && <Lightbox src={lightbox} onClose={() => setLightbox(null)} />}
     </div>
   );
 };
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+type Filter = 'all' | 'android' | 'ios' | 'verified' | 'unverified';
+
+const FILTER_LABEL: Record<Filter, string> = {
+  all: 'All', android: 'Android', ios: 'iOS', verified: 'Verified', unverified: 'Unverified',
+};
+
 export const Users: React.FC = () => {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [search, setSearch] = useState('');
+  // Dashboard stat cards deep-link here as /users?filter=android etc.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const paramFilter = searchParams.get('filter') as Filter | null;
+  const filter: Filter = paramFilter && paramFilter in FILTER_LABEL ? paramFilter : 'all';
+  const setFilter = (f: Filter) =>
+    setSearchParams(f === 'all' ? {} : { filter: f }, { replace: true });
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -305,6 +614,8 @@ export const Users: React.FC = () => {
         const snap = await getDocs(collection(db, 'users'));
         const list: UserProfile[] = [];
         snap.forEach(d => list.push({ id: d.id, ...d.data() } as UserProfile));
+        // newest registrations first
+        list.sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt));
         setUsers(list);
       } catch { /* silent */ }
       finally { setLoading(false); }
@@ -312,24 +623,76 @@ export const Users: React.FC = () => {
     fetchUsers();
   }, []);
 
+  const handleSetStatus = async (userId: string, status: Verification) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        verificationStatus: status,
+        // legacy flag kept in sync so older clients keep working
+        isVerified: status === 'verified',
+        verificationUpdatedAt: serverTimestamp(),
+        verifiedBy: 'Admin',
+      });
+      const patch = { verificationStatus: status, isVerified: status === 'verified' };
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, ...patch } : u));
+      setSelectedUser(prev => prev?.id === userId ? { ...prev, ...patch } : prev);
+    } catch (e) {
+      console.error(e);
+      alert('Could not update verification status.');
+    }
+  };
+
+  const counts = {
+    all: users.length,
+    android: users.filter(u => getPlatform(u) === 'android').length,
+    ios: users.filter(u => getPlatform(u) === 'ios').length,
+    verified: users.filter(u => getVerification(u) === 'verified').length,
+    unverified: users.filter(u => getVerification(u) !== 'verified').length,
+  };
+
   const filtered = users.filter(u => {
-    const q = search.toLowerCase();
-    return !q || (u.name || '').toLowerCase().includes(q) || (u.phone || '').includes(q);
+    const q = search.toLowerCase().trim();
+    const matchSearch = !q
+      || (u.name || '').toLowerCase().includes(q)
+      || (u.phone || '').includes(q)
+      || (u.email || '').toLowerCase().includes(q)
+      || (u.cnic || '').includes(q)
+      || (u.uid || u.id).toLowerCase().includes(q);
+    const matchFilter =
+      filter === 'all' ? true :
+      filter === 'android' ? getPlatform(u) === 'android' :
+      filter === 'ios' ? getPlatform(u) === 'ios' :
+      filter === 'verified' ? getVerification(u) === 'verified' :
+      getVerification(u) !== 'verified';
+    return matchSearch && matchFilter;
   });
 
   return (
     <div>
-      <div className="dashboard-header" style={{ textAlign: 'left', marginBottom: '2rem' }}>
+      <div className="dashboard-header" style={{ textAlign: 'left', marginBottom: '1.5rem' }}>
         <h1>Users</h1>
-        <p>Click any user to see their ride history and total spending</p>
+        <p>Click any user to review their full profile, ID documents, login history &amp; spending — then verify them</p>
+      </div>
+
+      {/* Filter pills */}
+      <div className="dv-filter-row">
+        {(Object.keys(FILTER_LABEL) as Filter[]).map(f => (
+          <button
+            key={f}
+            className={`dv-filter-pill ${filter === f ? 'active' : ''}`}
+            onClick={() => setFilter(f)}
+          >
+            {FILTER_LABEL[f]}
+            <span className="dv-pill-count">{counts[f]}</span>
+          </button>
+        ))}
       </div>
 
       {/* Search */}
       <div className="users-search-bar">
-        <MapPin size={16} style={{ color: 'var(--text-secondary)' }} />
+        <Search size={16} style={{ color: 'var(--text-secondary)' }} />
         <input
           type="text"
-          placeholder="Search by name or phone…"
+          placeholder="Search by name, phone, email, CNIC or UID…"
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="users-search-input"
@@ -348,24 +711,28 @@ export const Users: React.FC = () => {
         </div>
       ) : (
         <div className="users-grid">
-          {filtered.map(user => (
-            <div key={user.id} className="user-card" onClick={() => setSelectedUser(user)}>
-              <div className="user-avatar">{(user.name || 'U').charAt(0).toUpperCase()}</div>
-              <div className="user-card-info">
-                <div className="user-card-name">{user.name || 'Unnamed User'}</div>
-                <div className="user-card-phone">{user.phone || 'No phone'}</div>
-                <div className="user-card-meta">
-                  <span className="user-os-badge">
-                    <Smartphone size={11} /> {user.os || 'Unknown'}
-                  </span>
-                  <span className={`status-badge ${user.isVerified ? 'status-verified' : 'status-unverified'}`} style={{ fontSize: '0.7rem', padding: '0.2rem 0.6rem' }}>
-                    {user.isVerified ? <><ShieldAlert size={10} /> Verified</> : <><ShieldAlert size={10} /> Unverified</>}
-                  </span>
+          {filtered.map(user => {
+            const platform = getPlatform(user);
+            const verification = getVerification(user);
+            return (
+              <div key={user.id} className="user-card" onClick={() => setSelectedUser(user)}>
+                <div className="user-avatar">{(user.name || 'U').charAt(0).toUpperCase()}</div>
+                <div className="user-card-info">
+                  <div className="user-card-name">{user.name || 'Unnamed User'}</div>
+                  <div className="user-card-phone">{user.phone || 'No phone'}</div>
+                  {user.email && <div className="user-card-email">{user.email}</div>}
+                  <div className="user-card-meta">
+                    <PlatformBadge platform={platform} />
+                    <VerifyBadge state={verification} small />
+                    {user.loginCount != null && (
+                      <span className="user-os-badge"><LogIn size={10} /> {user.loginCount}</span>
+                    )}
+                  </div>
                 </div>
+                <ChevronRight size={16} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
               </div>
-              <ChevronRight size={16} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
-            </div>
-          ))}
+            );
+          })}
           {filtered.length === 0 && (
             <p style={{ color: 'var(--text-secondary)', gridColumn: '1/-1' }}>
               {search ? 'No users match your search.' : 'No users found.'}
@@ -375,10 +742,12 @@ export const Users: React.FC = () => {
       )}
 
       {selectedUser && (
-        <UserHistoryDrawer user={selectedUser} onClose={() => setSelectedUser(null)} />
+        <UserHistoryDrawer
+          user={selectedUser}
+          onClose={() => setSelectedUser(null)}
+          onSetStatus={handleSetStatus}
+        />
       )}
     </div>
   );
 };
-
-

@@ -1,34 +1,48 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, doc, updateDoc, query, where } from 'firebase/firestore';
+import {
+  collection, getDocs, getDoc, doc, query, where,
+  writeBatch, serverTimestamp,
+} from 'firebase/firestore';
 import { db } from '../firebase';
 import {
-  CheckCircle, X, Car, Truck, Phone, Hash, Shield, ShieldAlert,
-  Image as ImageIcon, Star, Navigation, Clock, XCircle,
-  DollarSign, TrendingUp, Loader, ChevronRight, Search,
-  CreditCard, Calendar, FileText, Activity, MapPin
+  getStatus, getVehicleType, getCarClass, getSeats, isFreight,
+  getCompany, getModel, getVariant, getEngineCc, getVehicleTitle,
+  getLicenceImg, getRegistrationImg, getCnicImg, getVehicleImages,
+  getDocumentCount, getUid,
+  STATUS_LABEL, VEHICLE_TYPES, VEHICLE_TYPE_LABEL, CAR_CLASS_LABEL,
+  type DriverApplicationFields, type AppStatus, type VehicleType,
+} from '../utils/driverSchema';
+import {
+  CheckCircle, X, Car, Truck, Bike, Bus, Phone, Hash, Shield, ShieldCheck, ShieldX,
+  Image as ImageIcon, Images, Star, Navigation, Clock, XCircle, Mail,
+  DollarSign, TrendingUp, Loader, ChevronRight, Search, Armchair, Gauge,
+  CreditCard, Calendar, FileText, Activity, MapPin, IdCard, UserCheck,
+  Info, ArrowUpDown, Undo2, MessageSquareWarning,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-interface Driver {
+type FireTime = number | string | { seconds: number } | null | undefined;
+
+interface Driver extends DriverApplicationFields {
   id: string;
-  userid?: string;
-  fullName?: string;
-  phoneNumber?: string;
-  carMake?: string;
-  carModel?: string;
-  carYear?: string;
-  carPlate?: string;
-  driversLicense?: string;
-  driversLicenseExpiration?: string;
-  cnicNum?: string;
-  cnicExp?: string;
-  freight?: boolean;
+  submittedAt?: FireTime;
+  /** Legacy static flag on the request document — set to "yes" by the app. */
   driver?: string;
-  carImg?: string;
-  cnicImg?: string;
-  licenseImg?: string;
-  isVerified?: boolean;
+}
+
+/** The `users/{uid}` account the application belongs to. */
+interface UserAccount {
+  id: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  cnic?: string;
+  idCardFrontUrl?: string;
+  idCardBackUrl?: string;
+  verificationStatus?: string;
+  driver?: boolean;
+  driverApplicationStatus?: string;
 }
 
 interface RideRecord {
@@ -116,14 +130,18 @@ const extractCoords = (loc: unknown): { lat: number; lng: number } | null => {
 
 const toNum = (v: unknown): number => { const n = Number(v); return isNaN(n) ? 0 : n; };
 
+const toMs = (t: FireTime): number => {
+  if (!t) return 0;
+  if (typeof t === 'number') return t > 1e12 ? t : t * 1000;
+  if (typeof t === 'string') { const d = Date.parse(t); return isNaN(d) ? 0 : d; }
+  if (typeof t === 'object' && 'seconds' in t) return t.seconds * 1000;
+  return 0;
+};
+
 const fmtTime = (t: unknown): string => {
-  if (!t) return '—';
-  let d: Date;
-  if (typeof t === 'number') d = new Date(t > 1e12 ? t : t * 1000);
-  else if (typeof t === 'string') d = new Date(t);
-  else if (typeof t === 'object' && t !== null && 'seconds' in t) d = new Date((t as { seconds: number }).seconds * 1000);
-  else return '—';
-  return d.toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' });
+  const ms = toMs(t as FireTime);
+  if (!ms) return '—';
+  return new Date(ms).toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' });
 };
 
 const isCompleted = (s?: string) => ['completed', 'finished', 'done'].includes((s || '').toLowerCase());
@@ -145,23 +163,66 @@ const StatusPill: React.FC<{ status?: string }> = ({ status }) => {
   return <span className={cls}>{label}</span>;
 };
 
-const PhotoThumb: React.FC<{ src?: string; label: string }> = ({ src, label }) => {
+/** Review-status badge for a driver application. */
+const AppStatusBadge: React.FC<{ status: AppStatus; small?: boolean }> = ({ status, small }) => {
+  const icon = status === 'approved' ? <ShieldCheck size={small ? 10 : 12} />
+    : status === 'rejected' ? <ShieldX size={small ? 10 : 12} />
+    : <Clock size={small ? 10 : 12} />;
+  return (
+    <span className={`verify-badge vs-${status === 'approved' ? 'verified' : status}`}
+          style={small ? { fontSize: '0.7rem' } : undefined}>
+      {icon} {STATUS_LABEL[status]}
+    </span>
+  );
+};
+
+const VehicleIcon: React.FC<{ type: VehicleType; size?: number }> = ({ type, size = 16 }) => {
+  if (type === 'bike') return <Bike size={size} />;
+  if (type === 'freight') return <Truck size={size} />;
+  if (type === 'hiace') return <Bus size={size} />;
+  if (type === 'rickshaw') return <Truck size={size} />;
+  return <Car size={size} />;
+};
+
+const Detail: React.FC<{
+  icon?: React.ReactNode; label: string; value?: React.ReactNode; mono?: boolean; full?: boolean;
+}> = ({ icon, label, value, mono, full }) => (
+  <div className="detail-item" style={full ? { gridColumn: '1 / -1' } : undefined}>
+    <span className="di-label">{icon} {label}</span>
+    <span className={`di-value${mono ? ' mono' : ''}`}>
+      {value === 0 || value ? value : '—'}
+    </span>
+  </div>
+);
+
+/** Document thumbnail — click opens the full-size lightbox so it can be read. */
+const DocThumb: React.FC<{ src?: string; label: string; onOpen: (src: string) => void }> = ({ src, label, onOpen }) => {
   const [err, setErr] = useState(false);
   if (!src || err) {
     return (
       <div className="dv-photo-box dv-photo-empty">
         <ImageIcon size={20} />
-        <span>{label}</span>
+        <span>{label} — not uploaded</span>
       </div>
     );
   }
   return (
-    <a href={src} target="_blank" rel="noopener noreferrer" className="dv-photo-box">
+    <button type="button" className="dv-photo-box id-photo-box" onClick={() => onOpen(src)} title={`View ${label} full size`}>
       <img src={src} alt={label} onError={() => setErr(true)} referrerPolicy="no-referrer" />
       <span>{label}</span>
-    </a>
+    </button>
   );
 };
+
+const Lightbox: React.FC<{ src: string; onClose: () => void }> = ({ src, onClose }) => (
+  <div className="lightbox-overlay" onClick={onClose}>
+    <button className="lightbox-close" onClick={onClose}><X size={22} /></button>
+    <img src={src} alt="Document" className="lightbox-img" onClick={e => e.stopPropagation()} referrerPolicy="no-referrer" />
+    <a href={src} target="_blank" rel="noopener noreferrer" className="lightbox-link" onClick={e => e.stopPropagation()}>
+      Open original in new tab
+    </a>
+  </div>
+);
 
 const StarRating: React.FC<{ value: number; max?: number }> = ({ value, max = 5 }) => (
   <div style={{ display: 'flex', gap: 2 }}>
@@ -178,16 +239,50 @@ const StarRating: React.FC<{ value: number; max?: number }> = ({ value, max = 5 
 
 // ─── Driver Detail Drawer ─────────────────────────────────────────────────────
 
-const DriverDrawer: React.FC<{ driver: Driver; onClose: () => void; onVerify: (id: string) => void }> = ({ driver, onClose, onVerify }) => {
+interface Decision {
+  status: AppStatus;
+  rejectionReason?: string;
+}
+
+const DriverDrawer: React.FC<{
+  driver: Driver;
+  onClose: () => void;
+  onDecide: (driver: Driver, decision: Decision) => Promise<void>;
+}> = ({ driver, onClose, onDecide }) => {
   const [rides, setRides] = useState<RideRecord[]>([]);
   const [ratings, setRatings] = useState<RatingRecord[]>([]);
+  const [account, setAccount] = useState<UserAccount | null>(null);
   const [loadingRides, setLoadingRides] = useState(true);
   const [loadingRatings, setLoadingRatings] = useState(true);
-  const [verifying, setVerifying] = useState(false);
+  const [loadingAccount, setLoadingAccount] = useState(true);
+  const [working, setWorking] = useState<AppStatus | null>(null);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState(driver.rejectionReason || '');
 
-  const uid = driver.userid || driver.id;
+  const uid = getUid(driver, driver.id);
+  const status = getStatus(driver);
+  const vehicleType = getVehicleType(driver);
+  const carClass = getCarClass(driver);
+  const seats = getSeats(driver);
+  const licenceImg = getLicenceImg(driver);
+  const registrationImg = getRegistrationImg(driver);
+  const cnicImg = getCnicImg(driver);
+  const vehicleImages = getVehicleImages(driver);
+  const hasDocs = getDocumentCount(driver) > 0;
 
   useEffect(() => {
+    // Load the account the application belongs to, so the reviewer can check
+    // the licence and registration are in the same person's name.
+    const fetchAccount = async () => {
+      setLoadingAccount(true);
+      try {
+        const snap = await getDoc(doc(db, 'users', uid));
+        setAccount(snap.exists() ? { id: snap.id, ...snap.data() } as UserAccount : null);
+      } catch (e) { console.error('[drivers] user load failed', e); setAccount(null); }
+      finally { setLoadingAccount(false); }
+    };
+
     // Fetch driver's rides from Firestore
     const fetchRides = async () => {
       setLoadingRides(true);
@@ -196,17 +291,7 @@ const DriverDrawer: React.FC<{ driver: Driver; onClose: () => void; onVerify: (i
         const snap = await getDocs(q);
         const list: RideRecord[] = [];
         snap.forEach(d => list.push({ id: d.id, ...d.data() } as RideRecord));
-        // Debug: log the first ride's pickup shape so we can see what Firebase returns
-        if (list.length > 0) {
-          console.log('[DriverDrawer] first ride pickup:', list[0].pickup, '| dropoff:', list[0].dropoff);
-        }
-        list.sort((a, b) => {
-          const ta = typeof a.time === 'number' ? a.time
-            : typeof a.time === 'object' && a.time && 'seconds' in a.time ? (a.time as { seconds: number }).seconds * 1000 : 0;
-          const tb = typeof b.time === 'number' ? b.time
-            : typeof b.time === 'object' && b.time && 'seconds' in b.time ? (b.time as { seconds: number }).seconds * 1000 : 0;
-          return tb - ta;
-        });
+        list.sort((a, b) => toMs(b.time as FireTime) - toMs(a.time as FireTime));
         setRides(list);
       } catch { setRides([]); }
       finally { setLoadingRides(false); }
@@ -225,6 +310,7 @@ const DriverDrawer: React.FC<{ driver: Driver; onClose: () => void; onVerify: (i
       finally { setLoadingRatings(false); }
     };
 
+    fetchAccount();
     fetchRides();
     fetchRatings();
   }, [uid]);
@@ -237,10 +323,28 @@ const DriverDrawer: React.FC<{ driver: Driver; onClose: () => void; onVerify: (i
     ? ratings.reduce((s, r) => s + (r.rating || 0), 0) / ratings.length
     : null;
 
-  const handleVerify = async () => {
-    setVerifying(true);
-    await onVerify(driver.id);
-    setVerifying(false);
+  // A licence in someone else's name is the thing this review exists to catch,
+  // so surface any disagreement between the application and the account.
+  const norm = (s?: string) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const nameMismatch = Boolean(
+    account && norm(account.name) && norm(driver.fullName) && norm(account.name) !== norm(driver.fullName)
+  );
+  const cnicMismatch = Boolean(
+    account && account.cnic && driver.cnicNum &&
+    account.cnic.replace(/\D/g, '') !== driver.cnicNum.replace(/\D/g, '')
+  );
+
+  const decide = async (next: AppStatus, rejectionReason?: string) => {
+    setWorking(next);
+    try {
+      await onDecide(driver, { status: next, rejectionReason });
+      if (next !== 'rejected') setRejecting(false);
+    } finally { setWorking(null); }
+  };
+
+  const submitRejection = () => {
+    if (!reason.trim()) return;
+    decide('rejected', reason.trim());
   };
 
   return (
@@ -251,20 +355,144 @@ const DriverDrawer: React.FC<{ driver: Driver; onClose: () => void; onVerify: (i
         <div className="modal-header dv-header">
           <div className="dv-header-left">
             <div className="dv-avatar">
-              {driver.freight ? <Truck size={22} /> : <Car size={22} />}
+              <VehicleIcon type={vehicleType} size={22} />
             </div>
             <div>
-              <div className="dv-name">{driver.fullName || 'Unknown Driver'}</div>
-              <div className="dv-phone"><Phone size={12} /> {driver.phoneNumber || '—'}</div>
+              <div className="dv-name">{driver.fullName || account?.name || 'Unknown Driver'}</div>
+              <div className="dv-phone"><Phone size={12} /> {driver.phoneNumber || account?.phone || '—'}</div>
             </div>
-            <span className={`status-badge ${driver.isVerified ? 'status-verified' : 'status-unverified'}`}>
-              {driver.isVerified ? 'Verified' : 'Pending'}
-            </span>
+            <AppStatusBadge status={status} />
           </div>
           <button className="modal-close-btn" onClick={onClose}><X size={20} /></button>
         </div>
 
         <div className="modal-body">
+
+          {/* ── Rejection reason currently shown to the driver ── */}
+          {status === 'rejected' && driver.rejectionReason && (
+            <div className="dv-reason-callout">
+              <MessageSquareWarning size={15} />
+              <div>
+                <strong>Rejected — reason shown to the driver</strong>
+                <p>{driver.rejectionReason}</p>
+              </div>
+            </div>
+          )}
+
+          {/* ── Linked account ── */}
+          <div className="modal-section">
+            <h3 className="modal-section-title"><UserCheck size={15} /> Account Holder</h3>
+            {loadingAccount ? (
+              <div className="loading-row"><Loader size={14} className="spin" /> Loading account…</div>
+            ) : !account ? (
+              <p className="verify-hint">
+                <Info size={12} /> No <span className="mono">users/{uid}</span> document — the account may have been deleted.
+              </p>
+            ) : (
+              <>
+                {(nameMismatch || cnicMismatch) && (
+                  <p className="verify-hint dv-mismatch">
+                    <Info size={12} />
+                    {nameMismatch && cnicMismatch
+                      ? 'Name and CNIC on the application differ from the account.'
+                      : nameMismatch
+                        ? 'Name on the application differs from the account name.'
+                        : 'CNIC on the application differs from the account CNIC.'}
+                  </p>
+                )}
+                <div className="modal-details-grid" style={{ marginBottom: '1rem' }}>
+                  <Detail icon={<Hash size={11} />} label="UID" value={uid} mono />
+                  <Detail icon={<UserCheck size={11} />} label="Account Name" value={account.name} />
+                  <Detail icon={<Phone size={11} />} label="Account Phone" value={account.phone} />
+                  <Detail icon={<Mail size={11} />} label="Account Email" value={account.email || driver.email} />
+                  <Detail icon={<CreditCard size={11} />} label="Account CNIC" value={account.cnic} mono />
+                  <Detail icon={<Shield size={11} />} label="Driver Mode" value={
+                    <span className={account.driver ? 'text-green' : 'text-orange'}>
+                      {account.driver ? 'Unlocked' : 'Locked'}
+                    </span>
+                  } />
+                </div>
+                <div className="dv-photo-row">
+                  <DocThumb src={account.idCardFrontUrl} label="ID Card — Front" onOpen={setLightbox} />
+                  <DocThumb src={account.idCardBackUrl}  label="ID Card — Back"  onOpen={setLightbox} />
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* ── Vehicle ── */}
+          <div className="modal-section">
+            <h3 className="modal-section-title"><Car size={15} /> Vehicle</h3>
+            <div className="modal-details-grid">
+              <Detail icon={<VehicleIcon type={vehicleType} size={11} />} label="Vehicle Type"
+                      value={VEHICLE_TYPE_LABEL[vehicleType]} />
+              {vehicleType === 'car' && (
+                <Detail icon={<Star size={11} />} label="Class"
+                        value={carClass ? CAR_CLASS_LABEL[carClass] : undefined} />
+              )}
+              <Detail icon={<Armchair size={11} />} label="Seats"
+                      value={seats === null ? (vehicleType === 'bike' ? 'N/A (bike)' : undefined) : seats} />
+              <Detail icon={<Car size={11} />} label="Company" value={getCompany(driver)} />
+              <Detail icon={<Car size={11} />} label="Model" value={getModel(driver)} />
+              <Detail icon={<Car size={11} />} label="Variant" value={getVariant(driver)} />
+              <Detail icon={<Gauge size={11} />} label="Engine (cc)" value={getEngineCc(driver)} />
+              <Detail icon={<Hash size={11} />} label="Number Plate" value={driver.carPlate} mono />
+              {driver.carYear && (
+                <Detail icon={<Calendar size={11} />} label="Year" value={driver.carYear} />
+              )}
+              <Detail icon={<Truck size={11} />} label="Freight" value={
+                <span className={isFreight(driver) ? 'text-green' : ''}>{isFreight(driver) ? 'Yes' : 'No'}</span>
+              } />
+            </div>
+          </div>
+
+          {/* ── Documents ── */}
+          <div className="modal-section">
+            <h3 className="modal-section-title"><FileText size={15} /> Documents</h3>
+            {!hasDocs && (
+              <p className="verify-hint"><Info size={12} /> No documents were uploaded with this application.</p>
+            )}
+
+            <h4 className="dv-doc-group">Driving Licence</h4>
+            <div className="dv-photo-row">
+              <DocThumb src={licenceImg} label="Driving Licence" onOpen={setLightbox} />
+              {cnicImg && <DocThumb src={cnicImg} label="CNIC (legacy upload)" onOpen={setLightbox} />}
+            </div>
+            {(driver.driversLicense || driver.driversLicenseExpiration) && (
+              <div className="modal-details-grid" style={{ marginTop: '0.75rem' }}>
+                <Detail icon={<IdCard size={11} />} label="Licence No." value={driver.driversLicense} mono />
+                <Detail icon={<Calendar size={11} />} label="Licence Expiry" value={driver.driversLicenseExpiration} />
+              </div>
+            )}
+
+            <h4 className="dv-doc-group"><Images size={12} /> Vehicle Photos ({vehicleImages.length})</h4>
+            <div className="dv-photo-row">
+              {vehicleImages.length === 0
+                ? <DocThumb label="Vehicle photo" onOpen={setLightbox} />
+                : vehicleImages.map((src, i) => (
+                    <DocThumb key={src} src={src} label={`Vehicle ${i + 1} of ${vehicleImages.length}`} onOpen={setLightbox} />
+                  ))}
+            </div>
+
+            <h4 className="dv-doc-group">Registration / Ownership Proof</h4>
+            <div className="dv-photo-row">
+              <DocThumb src={registrationImg} label="Registration Proof" onOpen={setLightbox} />
+            </div>
+          </div>
+
+          {/* ── Application details ── */}
+          <div className="modal-section">
+            <h3 className="modal-section-title"><FileText size={15} /> Application</h3>
+            <div className="modal-details-grid">
+              <Detail icon={<UserCheck size={11} />} label="Applicant Name" value={driver.fullName} />
+              <Detail icon={<Phone size={11} />} label="Phone" value={driver.phoneNumber} />
+              <Detail icon={<Mail size={11} />} label="Email" value={driver.email} />
+              <Detail icon={<CreditCard size={11} />} label="CNIC" value={driver.cnicNum} mono />
+              {driver.cnicExp && <Detail icon={<Calendar size={11} />} label="CNIC Expiry" value={driver.cnicExp} />}
+              <Detail icon={<Clock size={11} />} label="Submitted" value={driver.submittedAt ? fmtTime(driver.submittedAt) : undefined} />
+              <Detail icon={<Shield size={11} />} label="Status" value={STATUS_LABEL[status]} />
+            </div>
+          </div>
 
           {/* ── Earnings Summary ── */}
           <div className="modal-section">
@@ -307,42 +535,6 @@ const DriverDrawer: React.FC<{ driver: Driver; onClose: () => void; onVerify: (i
                 )}
               </div>
             )}
-          </div>
-
-          {/* ── Profile ── */}
-          <div className="modal-section">
-            <h3 className="modal-section-title"><FileText size={15} /> Profile &amp; Documents</h3>
-            <div className="modal-details-grid">
-              <div className="detail-item"><span className="di-label"><Hash size={11} /> UID</span><span className="di-value mono">{uid}</span></div>
-              <div className="detail-item"><span className="di-label"><CreditCard size={11} /> CNIC</span><span className="di-value">{driver.cnicNum || '—'}</span></div>
-              <div className="detail-item"><span className="di-label"><Calendar size={11} /> CNIC Exp.</span><span className="di-value">{driver.cnicExp || '—'}</span></div>
-              <div className="detail-item"><span className="di-label"><FileText size={11} /> License No.</span><span className="di-value">{driver.driversLicense || '—'}</span></div>
-              <div className="detail-item"><span className="di-label"><Calendar size={11} /> Lic. Exp.</span><span className="di-value">{driver.driversLicenseExpiration || '—'}</span></div>
-              <div className="detail-item">
-                <span className="di-label"><Truck size={11} /> Freight Driver</span>
-                <span className={`di-value ${driver.freight ? 'text-green' : ''}`}>{driver.freight ? 'Yes' : 'No'}</span>
-              </div>
-              <div className="detail-item">
-                <span className="di-label"><Shield size={11} /> Verified</span>
-                <span className={`di-value ${driver.isVerified ? 'text-green' : 'text-orange'}`}>{driver.isVerified ? 'Yes' : 'Pending'}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* ── Vehicle ── */}
-          <div className="modal-section">
-            <h3 className="modal-section-title"><Car size={15} /> Vehicle &amp; Documents</h3>
-            <div className="modal-details-grid" style={{ marginBottom: '1rem' }}>
-              <div className="detail-item"><span className="di-label">Make</span><span className="di-value">{driver.carMake || '—'}</span></div>
-              <div className="detail-item"><span className="di-label">Model</span><span className="di-value">{driver.carModel || '—'}</span></div>
-              <div className="detail-item"><span className="di-label">Year</span><span className="di-value">{driver.carYear || '—'}</span></div>
-              <div className="detail-item"><span className="di-label">Plate</span><span className="di-value">{driver.carPlate || '—'}</span></div>
-            </div>
-            <div className="dv-photo-row">
-              <PhotoThumb src={driver.carImg}     label="Vehicle" />
-              <PhotoThumb src={driver.licenseImg} label="License" />
-              <PhotoThumb src={driver.cnicImg}    label="CNIC" />
-            </div>
           </div>
 
           {/* ── Ratings ── */}
@@ -418,19 +610,68 @@ const DriverDrawer: React.FC<{ driver: Driver; onClose: () => void; onVerify: (i
             )}
           </div>
 
-          {/* ── Verify Button ── */}
-          {!driver.isVerified && (
-            <button
-              className="dv-verify-btn"
-              onClick={handleVerify}
-              disabled={verifying}
-            >
-              {verifying
-                ? <><Loader size={16} className="spin" /> Verifying…</>
-                : <><CheckCircle size={16} /> Approve &amp; Verify Driver</>}
-            </button>
+          {/* ── Review actions ── */}
+          {rejecting ? (
+            <div className="dv-reject-form">
+              <label className="dv-reject-label" htmlFor="dv-reason">
+                Rejection reason <span className="required">*</span>
+              </label>
+              <p className="verify-hint" style={{ margin: '0 0 0.5rem' }}>
+                <Info size={12} /> The driver sees this text in the app and can fix the problem and resubmit.
+              </p>
+              <textarea
+                id="dv-reason"
+                className="form-input form-textarea"
+                rows={3}
+                placeholder="e.g. The registration photo is blurred — please re-upload a clear picture showing the owner's name."
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+                autoFocus
+              />
+              <div className="verify-action-bar" style={{ marginTop: '0.75rem' }}>
+                <button className="dv-reject-btn" onClick={submitRejection} disabled={!reason.trim() || working !== null}>
+                  {working === 'rejected'
+                    ? <><Loader size={16} className="spin" /> Rejecting…</>
+                    : <><ShieldX size={16} /> Confirm Rejection</>}
+                </button>
+                <button className="dv-revoke-btn" onClick={() => setRejecting(false)} disabled={working !== null}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="verify-action-bar">
+                {status !== 'approved' && (
+                  <button className="dv-verify-btn" onClick={() => decide('approved')} disabled={working !== null}>
+                    {working === 'approved'
+                      ? <><Loader size={16} className="spin" /> Approving…</>
+                      : <><CheckCircle size={16} /> Approve &amp; Unlock Driver Mode</>}
+                  </button>
+                )}
+                {status !== 'rejected' && (
+                  <button className="dv-reject-btn" onClick={() => { setReason(driver.rejectionReason || ''); setRejecting(true); }} disabled={working !== null}>
+                    <ShieldX size={16} /> Reject…
+                  </button>
+                )}
+                {status !== 'pending' && (
+                  <button className="dv-revoke-btn" onClick={() => decide('pending')} disabled={working !== null}>
+                    {working === 'pending'
+                      ? <><Loader size={16} className="spin" /> Reverting…</>
+                      : <><Undo2 size={16} /> Move Back to Pending</>}
+                  </button>
+                )}
+              </div>
+              {status !== 'approved' && (
+                <p className="verify-hint" style={{ justifyContent: 'center' }}>
+                  <Info size={12} /> Approving sets the request to <span className="mono">approved</span> and <span className="mono">users/{uid}.driver = true</span>.
+                </p>
+              )}
+            </>
           )}
         </div>
+
+        {lightbox && <Lightbox src={lightbox} onClose={() => setLightbox(null)} />}
       </div>
     </div>
   );
@@ -441,11 +682,15 @@ const DriverDrawer: React.FC<{ driver: Driver; onClose: () => void; onVerify: (i
 const DriverCard: React.FC<{ driver: Driver; onClick: () => void }> = ({ driver, onClick }) => {
   const initials = (driver.fullName || 'D')
     .split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  const status = getStatus(driver);
+  const vehicleType = getVehicleType(driver);
+  const carClass = getCarClass(driver);
+  const title = getVehicleTitle(driver);
 
   return (
     <div className="dv-card" onClick={onClick}>
       {/* Avatar */}
-      <div className={`dv-card-avatar ${driver.freight ? 'freight' : ''}`}>
+      <div className={`dv-card-avatar ${isFreight(driver) ? 'freight' : ''}`}>
         {initials}
       </div>
 
@@ -455,9 +700,13 @@ const DriverCard: React.FC<{ driver: Driver; onClick: () => void }> = ({ driver,
         <div className="dv-card-phone"><Phone size={11} /> {driver.phoneNumber || '—'}</div>
         <div className="dv-card-tags">
           <span className="dv-vehicle-chip">
-            <Car size={11} /> {driver.carMake || '—'} {driver.carModel || '—'} · {driver.carPlate || '—'}
+            <VehicleIcon type={vehicleType} size={11} />
+            {VEHICLE_TYPE_LABEL[vehicleType]}
+            {carClass ? ` · ${CAR_CLASS_LABEL[carClass]}` : ''}
+            {title ? ` · ${title}` : ''}
+            {driver.carPlate ? ` · ${driver.carPlate}` : ''}
           </span>
-          {driver.freight && (
+          {isFreight(driver) && vehicleType !== 'freight' && (
             <span className="dv-freight-chip"><Truck size={11} /> Freight</span>
           )}
         </div>
@@ -465,9 +714,7 @@ const DriverCard: React.FC<{ driver: Driver; onClick: () => void }> = ({ driver,
 
       {/* Badge */}
       <div className="dv-card-right">
-        <span className={`status-badge ${driver.isVerified ? 'status-verified' : 'status-unverified'}`} style={{ fontSize: '0.7rem' }}>
-          {driver.isVerified ? <><ShieldAlert size={10} /> Verified</> : <><ShieldAlert size={10} /> Pending</>}
-        </span>
+        <AppStatusBadge status={status} small />
         <ChevronRight size={16} style={{ color: 'var(--text-secondary)', marginTop: '0.4rem' }} />
       </div>
     </div>
@@ -476,12 +723,25 @@ const DriverCard: React.FC<{ driver: Driver; onClick: () => void }> = ({ driver,
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+type StatusFilter = 'all' | AppStatus;
+type TypeFilter = 'all' | VehicleType;
+type SortKey = 'newest' | 'oldest' | 'name' | 'type';
+
+const SORT_LABEL: Record<SortKey, string> = {
+  newest: 'Newest first',
+  oldest: 'Oldest first',
+  name: 'Name (A–Z)',
+  type: 'Vehicle type',
+};
+
 export const Drivers: React.FC = () => {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Driver | null>(null);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<'all' | 'verified' | 'unverified' | 'freight'>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [sort, setSort] = useState<SortKey>('newest');
 
   useEffect(() => {
     const fetchDrivers = async () => {
@@ -497,54 +757,131 @@ export const Drivers: React.FC = () => {
     fetchDrivers();
   }, []);
 
-  const handleVerify = async (driverId: string) => {
+  /**
+   * A decision has to land on BOTH documents: the app's drawer reads
+   * `users/{uid}.driver` to unlock driver mode while this portal reads the
+   * request's `status` — write only one and the driver stays locked out of an
+   * approved account. The batch keeps the two from drifting apart.
+   */
+  const handleDecide = async (driver: Driver, { status, rejectionReason }: Decision) => {
+    const uid = getUid(driver, driver.id);
     try {
-      await updateDoc(doc(db, 'driverProfileRequests', driverId), { isVerified: true });
-      setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, isVerified: true } : d));
-      setSelected(prev => prev?.id === driverId ? { ...prev, isVerified: true } : prev);
-    } catch (e) { console.error(e); alert('Verification failed.'); }
+      const batch = writeBatch(db);
+
+      batch.update(doc(db, 'driverProfileRequests', driver.id), {
+        status,
+        rejectionReason: status === 'rejected' ? (rejectionReason || '') : '',
+        // legacy flag kept in sync so older clients and the dashboard counters
+        // keep working while records still carry the old schema
+        isVerified: status === 'approved',
+        reviewedAt: serverTimestamp(),
+        reviewedBy: 'Admin',
+      });
+
+      // merge-set rather than update: a missing user document must not abort the
+      // batch and leave the two records disagreeing
+      batch.set(doc(db, 'users', uid), {
+        driver: status === 'approved',
+        driverApplicationStatus: status,
+        driverStatusUpdatedAt: serverTimestamp(),
+      }, { merge: true });
+
+      await batch.commit();
+
+      const patch: Partial<Driver> = {
+        status,
+        rejectionReason: status === 'rejected' ? (rejectionReason || '') : '',
+        isVerified: status === 'approved',
+      };
+      setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, ...patch } : d));
+      setSelected(prev => prev?.id === driver.id ? { ...prev, ...patch } : prev);
+    } catch (e) {
+      console.error(e);
+      alert('Could not update the application. Neither document was changed — please retry.');
+    }
   };
 
+  const statusCounts: Record<StatusFilter, number> = {
+    all: drivers.length,
+    pending: drivers.filter(d => getStatus(d) === 'pending').length,
+    approved: drivers.filter(d => getStatus(d) === 'approved').length,
+    rejected: drivers.filter(d => getStatus(d) === 'rejected').length,
+  };
+
+  const typeCounts = drivers.reduce((acc, d) => {
+    const t = getVehicleType(d);
+    acc[t] = (acc[t] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
   const filtered = drivers.filter(d => {
-    const q = search.toLowerCase();
+    const q = search.toLowerCase().trim();
     const matchSearch = !q
       || (d.fullName || '').toLowerCase().includes(q)
       || (d.phoneNumber || '').includes(q)
-      || (d.carPlate || '').toLowerCase().includes(q);
-    const matchFilter =
-      filter === 'all' ? true :
-      filter === 'verified' ? !!d.isVerified :
-      filter === 'unverified' ? !d.isVerified :
-      filter === 'freight' ? !!d.freight : true;
-    return matchSearch && matchFilter;
+      || (d.email || '').toLowerCase().includes(q)
+      || (d.cnicNum || '').includes(q)
+      || (d.carPlate || '').toLowerCase().includes(q)
+      || getVehicleTitle(d).toLowerCase().includes(q);
+    const matchStatus = statusFilter === 'all' || getStatus(d) === statusFilter;
+    const matchType = typeFilter === 'all' || getVehicleType(d) === typeFilter;
+    return matchSearch && matchStatus && matchType;
   });
 
-  const counts = {
-    all: drivers.length,
-    verified: drivers.filter(d => d.isVerified).length,
-    unverified: drivers.filter(d => !d.isVerified).length,
-    freight: drivers.filter(d => d.freight).length,
-  };
+  const sorted = [...filtered].sort((a, b) => {
+    if (sort === 'name') return (a.fullName || '').localeCompare(b.fullName || '');
+    if (sort === 'type') {
+      const t = VEHICLE_TYPE_LABEL[getVehicleType(a)].localeCompare(VEHICLE_TYPE_LABEL[getVehicleType(b)]);
+      return t !== 0 ? t : (a.fullName || '').localeCompare(b.fullName || '');
+    }
+    // legacy records have no submittedAt and sort to the bottom of "newest"
+    const diff = toMs(a.submittedAt) - toMs(b.submittedAt);
+    return sort === 'oldest' ? diff : -diff;
+  });
 
   return (
     <div>
       <div className="dashboard-header" style={{ textAlign: 'left', marginBottom: '1.5rem' }}>
-        <h1>Drivers</h1>
-        <p>Click any driver to view full profile, earnings, ride history &amp; ratings</p>
+        <h1>Driver Applications</h1>
+        <p>Review each vehicle and its documents against the account holder's ID, then approve or reject</p>
       </div>
 
-      {/* Filter pills */}
+      {/* Status filter pills */}
       <div className="dv-filter-row">
-        {(['all', 'verified', 'unverified', 'freight'] as const).map(f => (
+        {(['all', 'pending', 'approved', 'rejected'] as StatusFilter[]).map(f => (
           <button
             key={f}
-            className={`dv-filter-pill ${filter === f ? 'active' : ''}`}
-            onClick={() => setFilter(f)}
+            className={`dv-filter-pill ${statusFilter === f ? 'active' : ''}`}
+            onClick={() => setStatusFilter(f)}
           >
-            {f.charAt(0).toUpperCase() + f.slice(1)}
-            <span className="dv-pill-count">{counts[f]}</span>
+            {f === 'all' ? 'All' : STATUS_LABEL[f]}
+            <span className="dv-pill-count">{statusCounts[f]}</span>
           </button>
         ))}
+      </div>
+
+      {/* Vehicle type + sort */}
+      <div className="dv-control-row">
+        <label className="dv-select-wrap">
+          <Car size={14} />
+          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value as TypeFilter)}>
+            <option value="all">All vehicle types ({drivers.length})</option>
+            {VEHICLE_TYPES.map(t => (
+              <option key={t} value={t}>{VEHICLE_TYPE_LABEL[t]} ({typeCounts[t] || 0})</option>
+            ))}
+            {typeCounts['unknown'] > 0 && (
+              <option value="unknown">{VEHICLE_TYPE_LABEL['unknown']} ({typeCounts['unknown']})</option>
+            )}
+          </select>
+        </label>
+        <label className="dv-select-wrap">
+          <ArrowUpDown size={14} />
+          <select value={sort} onChange={e => setSort(e.target.value as SortKey)}>
+            {(Object.keys(SORT_LABEL) as SortKey[]).map(k => (
+              <option key={k} value={k}>{SORT_LABEL[k]}</option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {/* Search */}
@@ -552,7 +889,7 @@ export const Drivers: React.FC = () => {
         <Search size={16} style={{ color: 'var(--text-secondary)' }} />
         <input
           className="users-search-input"
-          placeholder="Search by name, phone or plate…"
+          placeholder="Search by name, phone, email, CNIC, plate or vehicle…"
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
@@ -565,14 +902,14 @@ export const Drivers: React.FC = () => {
 
       {/* List */}
       {loading ? (
-        <div className="rides-loading"><Loader size={28} className="spin" /><p>Loading drivers…</p></div>
+        <div className="rides-loading"><Loader size={28} className="spin" /><p>Loading applications…</p></div>
       ) : (
         <div className="dv-list">
-          {filtered.map(driver => (
+          {sorted.map(driver => (
             <DriverCard key={driver.id} driver={driver} onClick={() => setSelected(driver)} />
           ))}
-          {filtered.length === 0 && (
-            <p style={{ color: 'var(--text-secondary)' }}>No drivers match your filter.</p>
+          {sorted.length === 0 && (
+            <p style={{ color: 'var(--text-secondary)' }}>No applications match your filter.</p>
           )}
         </div>
       )}
@@ -580,9 +917,12 @@ export const Drivers: React.FC = () => {
       {/* Drawer */}
       {selected && (
         <DriverDrawer
+          // keyed so switching applications resets the rejection form and
+          // in-flight review state instead of carrying them over
+          key={selected.id}
           driver={selected}
           onClose={() => setSelected(null)}
-          onVerify={handleVerify}
+          onDecide={handleDecide}
         />
       )}
     </div>
