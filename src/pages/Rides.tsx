@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { collection, getDocs, doc, getDoc, query, orderBy } from 'firebase/firestore';
 import { ref, onValue, off } from 'firebase/database';
 import { db, rtdb } from '../firebase';
+import { cabtypeLabel, cabtypeCategory, formatPKR } from '../utils/rideTaxonomy';
 import {
   Navigation, Clock, CheckCircle, XCircle, AlertCircle,
   Car, Truck, Bike, MapPin, X, User, Phone, Shield,
@@ -22,6 +23,9 @@ interface Ride {
   pickup?: string | RideLocation;
   dropoff?: string | RideLocation;
   cabtype?: string;
+  /** Written alongside cabtype so rides can be grouped without parsing keys. */
+  rideCategory?: string;
+  acOption?: string | null;
   status?: string;
   price?: number;
   distance?: string | number;
@@ -142,37 +146,41 @@ const isPending = (s: string) => ['pending', 'searching', 'waiting'].includes(s)
 const isCompleted = (s: string) => ['completed', 'finished', 'done'].includes(s);
 const isCancelled = (s: string) => ['cancelled', 'canceled', 'rejected'].includes(s);
 
+/**
+ * The ride's cabtype key, or 'intercity' for a city-to-city request. Substring
+ * matching is not safe against the current keys — "mini_nonac" contains "ac" —
+ * so the key is resolved through the shared taxonomy instead.
+ */
 const getRideType = (ride: Ride): string => {
   if (ride.source === 'citytocity') return 'intercity';
-  if (ride.cabtype) {
-    const t = ride.cabtype.toLowerCase();
-    if (t.includes('freight') || t.includes('truck')) return 'freight';
-    if (t.includes('bike') || t.includes('moto')) return 'bike';
-    if (t.includes('ac') || t.includes('air')) return 'ac';
-    if (t.includes('mini')) return 'mini';
-    return 'car';
-  }
-  return 'car';
+  return (ride.cabtype || ride.rideCategory || '').toLowerCase().trim();
 };
 
 const isFreightRide = (ride: Ride): boolean =>
-  ride.items != null || ride.freightSize != null || getRideType(ride) === 'freight';
+  ride.items != null || ride.freightSize != null || cabtypeCategory(getRideType(ride)) === 'freight';
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
+/** Coloured per ride category, labelled from the taxonomy so both the current
+ *  nine cabtypes and the legacy keys in historical rides read correctly. */
 const TypeBadge: React.FC<{ type: string }> = ({ type }) => {
-  const map: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-    mini:      { label: 'Mini',       color: '#3b82f6', icon: <Car size={11} /> },
-    car:       { label: 'Car',        color: '#8b5cf6', icon: <Car size={11} /> },
-    ac:        { label: 'AC',         color: '#06b6d4', icon: <Car size={11} /> },
-    bike:      { label: 'Bike',       color: '#f59e0b', icon: <Bike size={11} /> },
-    freight:   { label: 'Freight',    color: '#ef4444', icon: <Truck size={11} /> },
-    intercity: { label: 'Inter-City', color: '#10b981', icon: <Globe size={11} /> },
+  const map: Record<string, { color: string; icon: React.ReactNode }> = {
+    mini:          { color: '#8b5cf6', icon: <Car size={11} /> },
+    comfort:       { color: '#3b82f6', icon: <Car size={11} /> },
+    car_delivery:  { color: '#10b981', icon: <Package size={11} /> },
+    rickshaw:      { color: '#ec4899', icon: <Truck size={11} /> },
+    bike:          { color: '#f59e0b', icon: <Bike size={11} /> },
+    bike_delivery: { color: '#14b8a6', icon: <Package size={11} /> },
+    freight:       { color: '#ef4444', icon: <Truck size={11} /> },
+    intercity:     { color: '#10b981', icon: <Globe size={11} /> },
+    unknown:       { color: '#64748b', icon: <Car size={11} /> },
   };
-  const config = map[type] || map.car;
+  const key = type === 'intercity' ? 'intercity' : cabtypeCategory(type) ?? 'unknown';
+  const config = map[key];
+  const label = type === 'intercity' ? 'Inter-City' : cabtypeLabel(type);
   return (
     <span className="ride-type-badge" style={{ '--badge-color': config.color } as React.CSSProperties}>
-      {config.icon} {config.label}
+      {config.icon} {label}
     </span>
   );
 };
@@ -255,7 +263,7 @@ const RideDetailModal: React.FC<{ ride: Ride; onClose: () => void }> = ({ ride, 
           <div className="modal-section">
             <h3 className="modal-section-title"><Activity size={16} /> Trip Details</h3>
             <div className="modal-details-grid">
-              <div className="detail-item"><span className="di-label">Fare</span><span className="di-value">Rs. {ride.price ?? '—'}</span></div>
+              <div className="detail-item"><span className="di-label">Fare</span><span className="di-value">{ride.price != null ? formatPKR(ride.price) : '—'}</span></div>
               <div className="detail-item"><span className="di-label">Distance</span><span className="di-value">{ride.distance ?? '—'}</span></div>
               <div className="detail-item"><span className="di-label">Duration</span><span className="di-value">{ride.duration ?? '—'}</span></div>
               <div className="detail-item"><span className="di-label">Time</span><span className="di-value">{formatTime(ride.time)}</span></div>
@@ -589,7 +597,7 @@ export const Rides: React.FC = () => {
                       </span>
                     </div>
                   </td>
-                  <td className="cell-fare">Rs. {ride.price ?? '—'}</td>
+                  <td className="cell-fare">{ride.price != null ? formatPKR(ride.price) : '—'}</td>
                   <td className="cell-dim">{ride.distance ?? '—'}</td>
                   <td className="cell-dim">{formatTime(ride.time)}</td>
                   <td><ChevronRight size={16} style={{ color: 'var(--text-secondary)' }} /></td>

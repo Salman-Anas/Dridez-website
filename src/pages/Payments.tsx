@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { collection, getDocs, query, orderBy, doc, getDoc } from 'firebase/firestore';
 import { ref, onValue, off } from 'firebase/database';
 import { db, rtdb } from '../firebase';
+import { cabtypeLabel, formatPKR } from '../utils/rideTaxonomy';
 import {
   CreditCard, CheckCircle, XCircle, Clock, Users, Car,
   Wallet, DollarSign, TrendingUp, TrendingDown, X,
@@ -82,7 +83,7 @@ const toNum = (v: unknown): number => {
 };
 
 const formatCurrency = (amount: number): string =>
-  `Rs. ${Math.round(amount).toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  formatPKR(Math.round(amount));
 
 const formatTime = (t: RideDoc['time']): string => {
   const ms = toMs(t);
@@ -229,7 +230,7 @@ const PaymentDetailModal: React.FC<{ ride: RideDoc; onClose: () => void }> = ({ 
               <div className="detail-item"><span className="di-label">Amount</span><span className="di-value pay-amount-cell">{formatCurrency(toNum(ride.price))}</span></div>
               <div className="detail-item"><span className="di-label">Status</span><span className="di-value"><PaymentBadge status={ride.status || 'unknown'} /></span></div>
               <div className="detail-item"><span className="di-label">Distance</span><span className="di-value">{ride.distance || '—'}</span></div>
-              <div className="detail-item"><span className="di-label">Vehicle</span><span className="di-value">{ride.cabtype || '—'}</span></div>
+              <div className="detail-item"><span className="di-label">Vehicle</span><span className="di-value">{cabtypeLabel(ride.cabtype)}</span></div>
               <div className="detail-item"><span className="di-label">Date & Time</span><span className="di-value">{formatTime(ride.time)}</span></div>
               <div className="detail-item"><span className="di-label">Source</span><span className="di-value">{ride.source === 'rtdb' ? 'Realtime DB' : ride.source === 'citytocity' ? 'Inter-City' : 'Firestore'}</span></div>
               <div className="detail-item" style={{ gridColumn: '1 / -1' }}><span className="di-label">Ride ID</span><span className="di-value mono">{ride.id}</span></div>
@@ -759,7 +760,7 @@ export const Payments: React.FC = () => {
                           </span>
                         </div>
                       </td>
-                      <td className="cell-dim">{ride.cabtype || '—'}</td>
+                      <td className="cell-dim">{cabtypeLabel(ride.cabtype)}</td>
                       <td className="cell-dim">{ride.distance || '—'}</td>
                       <td className="cell-dim">{formatTime(ride.time)}</td>
                       <td><ChevronRight size={16} style={{ color: 'var(--text-secondary)' }} /></td>

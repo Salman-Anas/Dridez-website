@@ -7,6 +7,12 @@
 // Everything that reads an application goes through these resolvers so both
 // shapes render identically instead of showing blanks.
 
+import {
+  normaliseVehicle, getServedCabtypes, vehicleTierLabel,
+  DRIVER_VEHICLE_TYPES,
+  type NormalisedVehicle, type DriverVehicleType, type DriverCarClass, type AcOption,
+} from './rideTaxonomy';
+
 export interface DriverApplicationFields {
   /** Ownership — the request document id is the auth uid on new records. */
   userId?: string;
@@ -21,7 +27,10 @@ export interface DriverApplicationFields {
 
   /** Vehicle (new schema). */
   vehicleType?: string;
+  /** Car tier — "mini" | "comfort"; legacy records stored "regular" | "ac". */
   carClass?: string;
+  /** "ac" | "nonac"; absent on records predating the AC question. */
+  acOption?: string;
   seats?: number | null;
   vehicleCompany?: string;
   vehicleModel?: string;
@@ -76,9 +85,11 @@ export const STATUS_LABEL: Record<AppStatus, string> = {
 
 // ─── Vehicle type & class ────────────────────────────────────────────────────
 
-export type VehicleType = 'car' | 'rickshaw' | 'bike' | 'hiace' | 'freight' | 'unknown';
+/** Re-exported so components have a single import for the driver taxonomy. */
+export type VehicleType = DriverVehicleType;
+export type { NormalisedVehicle, DriverCarClass, AcOption };
 
-export const VEHICLE_TYPES: VehicleType[] = ['car', 'rickshaw', 'bike', 'hiace', 'freight'];
+export const VEHICLE_TYPES: VehicleType[] = DRIVER_VEHICLE_TYPES;
 
 export const VEHICLE_TYPE_LABEL: Record<VehicleType, string> = {
   car: 'Car',
@@ -103,19 +114,25 @@ export const getVehicleType = (a: DriverApplicationFields): VehicleType => {
   return 'unknown';
 };
 
-export type CarClass = 'mini' | 'regular' | 'ac' | '';
+/**
+ * The driver's vehicle with the car tier normalised: legacy applications have
+ * no `acOption` and folded the AC answer into `carClass`, so without this they
+ * match none of the tier filters and disappear from the list.
+ */
+export const getVehicle = (a: DriverApplicationFields): NormalisedVehicle =>
+  normaliseVehicle({
+    vehicleType: getVehicleType(a),
+    carClass: a.carClass,
+    acOption: a.acOption,
+  });
 
-export const CAR_CLASS_LABEL: Record<Exclude<CarClass, ''>, string> = {
-  mini: 'Mini',
-  regular: 'Regular',
-  ac: 'AC',
-};
+/** "Mini · AC", "Bike", "No vehicle type" — the driver's own tier. */
+export const getTierLabel = (a: DriverApplicationFields): string =>
+  vehicleTierLabel(getVehicle(a));
 
-/** Car class only applies to `vehicleType === "car"`; blank everywhere else. */
-export const getCarClass = (a: DriverApplicationFields): CarClass => {
-  const raw = (a.carClass || '').toLowerCase().trim();
-  return raw === 'mini' || raw === 'regular' || raw === 'ac' ? raw : '';
-};
+/** The cabtypes this driver's feed actually receives requests for. */
+export const getServedTypes = (a: DriverApplicationFields): string[] =>
+  getServedCabtypes(getVehicle(a));
 
 /** Bikes carry `null` seats — that is a real value, not a missing one. */
 export const getSeats = (a: DriverApplicationFields): number | null => {

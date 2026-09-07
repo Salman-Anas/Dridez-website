@@ -5,6 +5,7 @@ import {
   orderBy, limit, serverTimestamp
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { formatPKR } from '../utils/rideTaxonomy';
 import {
   getPlatform, getVerification, platformLabel,
   type Platform, type Verification,
@@ -488,7 +489,7 @@ const UserHistoryDrawer: React.FC<{
                 </div>
                 <div className="user-stat-box total-spend" style={{ '--stat-color': 'var(--accent-purple)' } as React.CSSProperties}>
                   <DollarSign size={18} />
-                  <div className="usb-val">Rs. {totalSpending.toLocaleString()}</div>
+                  <div className="usb-val">{formatPKR(totalSpending)}</div>
                   <div className="usb-label">Total Spent</div>
                 </div>
               </div>
@@ -540,7 +541,7 @@ const UserHistoryDrawer: React.FC<{
                     </div>
                     <div className="rhi-right">
                       <StatusPill status={ride.status} />
-                      <div className="rhi-price">Rs. {toNum(ride.price) || '—'}</div>
+                      <div className="rhi-price">{toNum(ride.price) ? formatPKR(toNum(ride.price)) : '—'}</div>
                     </div>
                   </div>
                   );

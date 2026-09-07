@@ -33,6 +33,9 @@ Stores customer profile, identity-verification and device/session information.
 | `driver` | `boolean` | `true` once the driver application is approved. **Set by the Admin Portal** — the app's drawer reads this to unlock driver mode. |
 | `driverApplicationStatus` | `string` | Mirrors `driverProfileRequests/{uid}.status`. **Set by the Admin Portal.** |
 | `driverStatusUpdatedAt` | `timestamp` | **Admin Portal Only**: when the driver decision was last written. |
+| `driverVehicleType` | `string` | Mirror of `driverProfileRequests/{uid}.vehicleType`. |
+| `driverCarClass` | `string` | Mirror of `driverProfileRequests/{uid}.carClass`. |
+| `driverAcOption` | `string` | Mirror of `driverProfileRequests/{uid}.acOption`. |
 
 #### `users/{uid}/loginHistory` Subcollection
 One document per login/session event.
@@ -63,7 +66,8 @@ reads both through `src/utils/driverSchema.ts`.
 | `cnicNum` | `string` | CNIC (National ID) number — copied from `users/{uid}`. |
 | `email` | `string` | Email address — copied from `users/{uid}`. |
 | `vehicleType` | `string` | `car` \| `rickshaw` \| `bike` \| `hiace` \| `freight`. |
-| `carClass` | `string` | `mini` \| `regular` \| `ac` — only when `vehicleType === "car"`, otherwise `""`. |
+| `carClass` | `string` | `mini` \| `comfort` — only when `vehicleType === "car"`, otherwise `""`. Legacy records stored `regular` (non-AC sedan) or `ac` (AC sedan) here. |
+| `acOption` | `string` | `ac` \| `nonac` — cars only; absent on records predating the AC question, which the portal reads back as `nonac`. |
 | `seats` | `number` \| `null` | Passenger seats; `null` for bikes. |
 | `vehicleCompany` | `string` | Vehicle manufacturer (e.g., Toyota). |
 | `vehicleModel` | `string` | Vehicle model (e.g., Corolla). |
@@ -114,7 +118,9 @@ reads both through `src/utils/driverSchema.ts`.
 | `rider` | `string` | The UID of the rider requesting the trip. |
 | `pickup` | `string` / `object` | Pickup location details. |
 | `dropoff` | `string` / `object` | Dropoff location details. |
-| `cabtype` | `string` | Requested vehicle type (e.g., car, mini). |
+| `cabtype` | `string` | One of the nine ride types — see the Ride Taxonomy section below. |
+| `rideCategory` | `string` | The base choice behind `cabtype`, so rides can be grouped without parsing keys. |
+| `acOption` | `string` \| `null` | `ac` \| `nonac` for the two car tiers; `null` otherwise. |
 | `price` | `number` | Offered price for the trip. |
 | `passengers` | `number` | Number of passengers traveling. |
 | `detail` | `string` | Additional ride details or instructions. |
@@ -134,6 +140,88 @@ Stores counter-offers made by drivers on `citytocity` ride requests.
 | `review` | `string` | Text review/feedback. |
 | `rideId` | `string` | Reference to the associated ride. |
 
+### `rates/rates` Document
+A flat map of ride-type key → per-km rate in PKR. The app's fare formula is
+`price = rate * distanceInKm + 2.5`.
+
+When a ride type's own key is unset the app walks a fallback chain and takes the
+first key with a value greater than zero:
+
+| Ride type | Fallback chain |
+| :--- | :--- |
+| `mini_ac` | `mini_ac` → `mini` → `ac` |
+| `mini_nonac` | `mini_nonac` → `mini` → `regular` |
+| `comfort_ac` | `comfort_ac` → `comfort` → `ac` |
+| `comfort_nonac` | `comfort_nonac` → `comfort` → `regular` |
+| `car_delivery` | `car_delivery` → `deliver` → `delivery` |
+| `bike_delivery` | `bike_delivery` → `bike` → `deliver` |
+| `rickshaw` | `rickshaw` → `mini` |
+| `bike` | `bike` |
+| `freight` | `freight` — **no fallback** |
+
+A key with no value anywhere in its chain means the app shows no fare and the
+rider cannot book that type. **`freight` is the sharpest case**: the freight
+booking screen reads `rates["freight"]` directly, so leaving it unset breaks
+freight fares entirely.
+
+The document also holds `city-to-city` (intercity per-km rate) and `comission`
+(platform cut, stored as a decimal multiplier — `0.1` means 10%).
+
+**Legacy keys** — `mini`, `regular`, `ac`, `comfort`, `deliver`, `delivery` — are
+read directly by app builds still installed on real phones, and several act as
+fallback sources above. They are never deleted or renamed, only kept in sync;
+the Settings page keeps them editable under a collapsed "Legacy" section. Values
+have been written as both numbers and numeric strings over the document's life,
+so readers parse tolerantly and writers preserve whatever type a key already has.
+
+---
+
+## 1b. Ride Taxonomy
+
+Riders pick a category first, and for the two car tiers are then asked AC or
+Non-AC. The two answers are combined into a single `cabtype` string, which is
+written onto every ride request, keys `rates/rates`, and is what the driver feed
+filters on. These strings are a contract with the mobile client and are defined
+once in `src/utils/rideTaxonomy.ts`.
+
+| `cabtype` | Label | `rideCategory` | `acOption` |
+| :--- | :--- | :--- | :--- |
+| `mini_ac` | Mini · AC | `mini` | `ac` |
+| `mini_nonac` | Mini · Non AC | `mini` | `nonac` |
+| `comfort_ac` | Comfort · AC | `comfort` | `ac` |
+| `comfort_nonac` | Comfort · Non AC | `comfort` | `nonac` |
+| `car_delivery` | Car Delivery | `car_delivery` | `null` |
+| `rickshaw` | Rickshaw | `rickshaw` | `null` |
+| `bike` | Bike | `bike` | `null` |
+| `bike_delivery` | Bike Delivery | `bike_delivery` | `null` |
+| `freight` | Freight | `freight` | `null` |
+
+**Legacy cabtypes** still present in historical rides are display-mapped, not
+migrated: `regular` → Comfort · Non AC, `ac` → Comfort · AC, `deliver` → Car
+Delivery. `mini` stays "Mini" — it never recorded an AC answer, so it is not
+invented into one of the two mini tiers.
+
+### Which ride types a driver receives
+| `vehicleType` | Receives |
+| :--- | :--- |
+| `car` | `<carClass>_<acOption>`, `car_delivery` |
+| `bike` | `bike`, `bike_delivery` |
+| `rickshaw` | `rickshaw` |
+| `hiace` | `hiace` |
+| `freight` | `freight` |
+
+A car driver also serves car deliveries and a bike driver bike deliveries — the
+same vehicle carrying a package instead of a person. Matching on the car tier is
+exact: a Mini AC car only ever sees `mini_ac` requests, never `mini_nonac` or
+`comfort_ac`. A driver with no `vehicleType` matches nothing and silently
+receives no work, which the Drivers page flags on the row.
+
+Note that `hiace` is not one of the nine rider-facing cabtypes, so no rider
+request currently matches a Hiace driver.
+
+The same three values are mirrored on `users/{uid}` as `driverVehicleType`,
+`driverCarClass` and `driverAcOption`.
+
 ---
 
 ## 2. Realtime Database (RTDB) Paths
@@ -145,7 +233,7 @@ Used for creating new standard/freight rides where drivers can listen for reques
 | :--- | :--- | :--- |
 | `pickup` | `object` | Pickup coordinates & address details. |
 | `dropoff` | `object` | Dropoff coordinates & address details. |
-| `cabtype` | `string` | Vehicle type requested. |
+| `cabtype` | `string` | One of the nine ride types — see the Ride Taxonomy section below. |
 | `distance` | `string`/`number`| Estimated distance of the trip. |
 | `duration` | `string`/`number`| Estimated time duration of the trip. |
 | `price` | `number` | Offered price. |

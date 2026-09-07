@@ -6,6 +6,7 @@ import { db, rtdb } from '../firebase';
 import { StatCard } from './StatCard';
 import { getPlatform, getVerification, type UserSchemaFields } from '../utils/userSchema';
 import { getStatus, isFreight, type DriverApplicationFields } from '../utils/driverSchema';
+import { formatPKR } from '../utils/rideTaxonomy';
 import {
   Users, Smartphone, ShieldCheck, ShieldAlert,
   Car, Bike, Truck, Navigation, CheckCircle, XCircle,
@@ -291,7 +292,7 @@ export const Dashboard: React.FC = () => {
           <StatCard title="Inter-City Trips"  value={stats.trips.intercity} icon={<Globe />}        color="var(--accent-cyan)"   onClick={() => navigate('/rides')} />
           <StatCard
             title="Total Revenue (Completed)"
-            value={stats.trips.revenue !== null ? `Rs. ${stats.trips.revenue.toLocaleString()}` : null}
+            value={stats.trips.revenue !== null ? formatPKR(stats.trips.revenue) : null}
             icon={<DollarSign />}
             color="var(--accent-green)"
             onClick={() => navigate('/payments')}
@@ -321,7 +322,7 @@ export const Dashboard: React.FC = () => {
             <StatCard
               title="Avg Fare (Completed)"
               value={stats.trips.avgFare !== null && stats.trips.avgFare > 0
-                ? `Rs. ${stats.trips.avgFare.toLocaleString()}`
+                ? formatPKR(stats.trips.avgFare)
                 : null}
               icon={<DollarSign />}
               color="var(--accent-purple)"

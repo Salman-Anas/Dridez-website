@@ -3724,3 +3724,195 @@ body {
   .dv-select-wrap { width: 100%; }
   .dv-select-wrap select { flex: 1; }
 }
+
+/* ─── Rate editor: effective rate, fallbacks and broken keys ────────────────
+   A cabtype whose own key is unset is still priced — by a fallback key — so
+   the card has to say which key the money is actually coming from, and shout
+   when nothing in the chain resolves and the type cannot be booked at all. */
+.rate-card-key {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  margin-bottom: 0.6rem;
+}
+
+.rate-card-fallback { border-color: rgba(217,119,6,0.45); }
+.rate-card-broken   { border-color: rgba(220,38,38,0.55); }
+
+.rate-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 9px;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.rate-status svg { flex-shrink: 0; margin-top: 0.12rem; }
+
+.rate-status-ok {
+  color: var(--accent-green);
+  background: rgba(22,163,74,0.07);
+}
+
+.rate-status-warn {
+  color: var(--accent-orange);
+  background: rgba(217,119,6,0.09);
+  font-weight: 500;
+}
+
+.rate-status-error {
+  color: var(--accent-red);
+  background: rgba(220,38,38,0.09);
+  font-weight: 500;
+}
+
+/* Page-level roll-up of everything mispriced */
+.rate-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  margin-bottom: 1.25rem;
+  border-radius: 12px;
+  border: 1px solid;
+  border-left-width: 4px;
+}
+
+.rate-alert svg { flex-shrink: 0; margin-top: 0.1rem; }
+.rate-alert strong { display: block; font-size: 0.9rem; }
+.rate-alert p { margin: 0.25rem 0 0; font-size: 0.83rem; color: var(--text-primary); }
+
+.rate-alert-error {
+  border-color: var(--accent-red);
+  background: rgba(220,38,38,0.07);
+  color: var(--accent-red);
+}
+
+.rate-alert-warn {
+  border-color: var(--accent-orange);
+  background: rgba(217,119,6,0.07);
+  color: var(--accent-orange);
+}
+
+/* Collapsed legacy section */
+.rate-legacy-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--surface-color);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.rate-legacy-toggle:hover { border-color: var(--accent-blue); }
+
+.rate-legacy-chevron {
+  margin-left: auto;
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
+}
+
+.rate-legacy-chevron.open { transform: rotate(180deg); }
+
+.rate-legacy-note {
+  margin: 0.75rem 0 1rem;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* ─── Driver: ride types the feed actually receives ─────────────────────── */
+.dv-serves {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  color: var(--text-secondary);
+}
+
+.dv-serves-compact { margin-top: 0.35rem; }
+
+.dv-serves-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid rgba(37,99,235,0.25);
+  background: rgba(37,99,235,0.08);
+  color: var(--accent-blue);
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* A served key that no rider can actually request */
+.dv-serves-chip-warn {
+  border-color: rgba(217,119,6,0.3);
+  background: rgba(217,119,6,0.1);
+  color: var(--accent-orange);
+}
+
+.dv-serves-none {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid rgba(220,38,38,0.3);
+  background: rgba(220,38,38,0.09);
+  color: var(--accent-red);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+/* Drivers who silently receive no work at all */
+.dv-feed-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--accent-orange);
+  border-left-width: 3px;
+  border-radius: 10px;
+  background: rgba(217,119,6,0.07);
+  color: var(--accent-orange);
+  font-size: 0.83rem;
+  font-weight: 500;
+}
+
+.dv-feed-warning svg { flex-shrink: 0; }
+
+.dv-feed-warning-btn {
+  margin-left: auto;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--accent-orange);
+  border-radius: 8px;
+  background: none;
+  color: var(--accent-orange);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s ease;
+}
+
+.dv-feed-warning-btn:hover { background: rgba(217,119,6,0.12); }
+
+@media (max-width: 768px) {
+  .dv-feed-warning { flex-wrap: wrap; }
+  .dv-feed-warning-btn { margin-left: 0; }
+}

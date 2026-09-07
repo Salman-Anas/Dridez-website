@@ -5,19 +5,23 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
-  getStatus, getVehicleType, getCarClass, getSeats, isFreight,
+  getStatus, getVehicleType, getVehicle, getSeats, isFreight,
   getCompany, getModel, getVariant, getEngineCc, getVehicleTitle,
   getLicenceImg, getRegistrationImg, getCnicImg, getVehicleImages,
   getDocumentCount, getUid,
-  STATUS_LABEL, VEHICLE_TYPES, VEHICLE_TYPE_LABEL, CAR_CLASS_LABEL,
+  STATUS_LABEL, VEHICLE_TYPE_LABEL,
   type DriverApplicationFields, type AppStatus, type VehicleType,
 } from '../utils/driverSchema';
+import {
+  VEHICLE_FILTERS, matchesVehicleFilter, getServedCabtypes, vehicleTierLabel,
+  cabtypeLabel, isBookableCabtype, formatPKR,
+} from '../utils/rideTaxonomy';
 import {
   CheckCircle, X, Car, Truck, Bike, Bus, Phone, Hash, Shield, ShieldCheck, ShieldX,
   Image as ImageIcon, Images, Star, Navigation, Clock, XCircle, Mail,
   DollarSign, TrendingUp, Loader, ChevronRight, Search, Armchair, Gauge,
   CreditCard, Calendar, FileText, Activity, MapPin, IdCard, UserCheck,
-  Info, ArrowUpDown, Undo2, MessageSquareWarning,
+  Info, ArrowUpDown, Undo2, MessageSquareWarning, Radio, AlertTriangle, Snowflake,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -184,6 +188,38 @@ const VehicleIcon: React.FC<{ type: VehicleType; size?: number }> = ({ type, siz
   return <Car size={size} />;
 };
 
+/**
+ * The cabtypes this driver's feed receives. A car driver also serves car
+ * deliveries and a bike driver bike deliveries — same vehicle, package instead
+ * of a person. A driver with no vehicle type matches nothing and silently
+ * receives no work at all, which is invisible anywhere else in the portal.
+ */
+const ServedTypes: React.FC<{ served: string[]; compact?: boolean }> = ({ served, compact }) => {
+  if (served.length === 0) {
+    return (
+      <span className="dv-serves-none" title="This driver matches no ride requests and sees an empty feed">
+        <AlertTriangle size={11} /> Receives no requests
+      </span>
+    );
+  }
+  return (
+    <span className={`dv-serves${compact ? ' dv-serves-compact' : ''}`}>
+      {!compact && <Radio size={11} />}
+      {served.map(key => (
+        <span
+          key={key}
+          className={`dv-serves-chip${isBookableCabtype(key) ? '' : ' dv-serves-chip-warn'}`}
+          title={isBookableCabtype(key)
+            ? `Receives ${cabtypeLabel(key)} requests`
+            : `"${key}" is not one of the nine rider-facing ride types — no rider can request it`}
+        >
+          {cabtypeLabel(key)}
+        </span>
+      ))}
+    </span>
+  );
+};
+
 const Detail: React.FC<{
   icon?: React.ReactNode; label: string; value?: React.ReactNode; mono?: boolean; full?: boolean;
 }> = ({ icon, label, value, mono, full }) => (
@@ -263,7 +299,8 @@ const DriverDrawer: React.FC<{
   const uid = getUid(driver, driver.id);
   const status = getStatus(driver);
   const vehicleType = getVehicleType(driver);
-  const carClass = getCarClass(driver);
+  const vehicle = getVehicle(driver);
+  const served = getServedCabtypes(vehicle);
   const seats = getSeats(driver);
   const licenceImg = getLicenceImg(driver);
   const registrationImg = getRegistrationImg(driver);
@@ -427,8 +464,14 @@ const DriverDrawer: React.FC<{
               <Detail icon={<VehicleIcon type={vehicleType} size={11} />} label="Vehicle Type"
                       value={VEHICLE_TYPE_LABEL[vehicleType]} />
               {vehicleType === 'car' && (
-                <Detail icon={<Star size={11} />} label="Class"
-                        value={carClass ? CAR_CLASS_LABEL[carClass] : undefined} />
+                <>
+                  <Detail icon={<Star size={11} />} label="Class"
+                          value={vehicle.carClass === 'mini' ? 'Mini'
+                               : vehicle.carClass === 'comfort' ? 'Comfort' : undefined} />
+                  <Detail icon={<Snowflake size={11} />} label="AC"
+                          value={vehicle.acOption === 'ac' ? 'AC'
+                               : vehicle.acOption === 'nonac' ? 'Non AC' : undefined} />
+                </>
               )}
               <Detail icon={<Armchair size={11} />} label="Seats"
                       value={seats === null ? (vehicleType === 'bike' ? 'N/A (bike)' : undefined) : seats} />
@@ -443,7 +486,21 @@ const DriverDrawer: React.FC<{
               <Detail icon={<Truck size={11} />} label="Freight" value={
                 <span className={isFreight(driver) ? 'text-green' : ''}>{isFreight(driver) ? 'Yes' : 'No'}</span>
               } />
+              <Detail icon={<Radio size={11} />} label="Ride Types Received" full
+                      value={<ServedTypes served={served} />} />
             </div>
+            {vehicle.normalised && (
+              <p className="verify-hint">
+                <Info size={12} /> Submitted before the AC question existed — the tier above was
+                read back from the old <span className="mono">carClass</span> value.
+              </p>
+            )}
+            {vehicleType === 'car' && !vehicle.carClass && (
+              <p className="verify-hint dv-mismatch">
+                <AlertTriangle size={12} /> No car tier on this application, so the driver only ever
+                receives car deliveries — never a passenger request.
+              </p>
+            )}
           </div>
 
           {/* ── Documents ── */}
@@ -503,12 +560,12 @@ const DriverDrawer: React.FC<{
               <div className="user-stats-row">
                 <div className="user-stat-box" style={{ '--stat-color': 'var(--accent-green)' } as React.CSSProperties}>
                   <DollarSign size={18} />
-                  <div className="usb-val">Rs. {totalEarnings.toLocaleString()}</div>
+                  <div className="usb-val">{formatPKR(totalEarnings)}</div>
                   <div className="usb-label">Total Earned</div>
                 </div>
                 <div className="user-stat-box" style={{ '--stat-color': 'var(--accent-purple)' } as React.CSSProperties}>
                   <TrendingUp size={18} />
-                  <div className="usb-val">Rs. {avgFare.toLocaleString()}</div>
+                  <div className="usb-val">{formatPKR(avgFare)}</div>
                   <div className="usb-label">Avg Fare</div>
                 </div>
                 <div className="user-stat-box" style={{ '--stat-color': 'var(--accent-blue)' } as React.CSSProperties}>
@@ -601,7 +658,7 @@ const DriverDrawer: React.FC<{
                     </div>
                     <div className="rhi-right">
                       <StatusPill status={ride.status} />
-                      <div className="rhi-price">Rs. {toNum(ride.price) || '—'}</div>
+                      <div className="rhi-price">{toNum(ride.price) ? formatPKR(toNum(ride.price)) : '—'}</div>
                     </div>
                   </div>
                   );
@@ -684,7 +741,8 @@ const DriverCard: React.FC<{ driver: Driver; onClick: () => void }> = ({ driver,
     .split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   const status = getStatus(driver);
   const vehicleType = getVehicleType(driver);
-  const carClass = getCarClass(driver);
+  const vehicle = getVehicle(driver);
+  const served = getServedCabtypes(vehicle);
   const title = getVehicleTitle(driver);
 
   return (
@@ -701,8 +759,7 @@ const DriverCard: React.FC<{ driver: Driver; onClick: () => void }> = ({ driver,
         <div className="dv-card-tags">
           <span className="dv-vehicle-chip">
             <VehicleIcon type={vehicleType} size={11} />
-            {VEHICLE_TYPE_LABEL[vehicleType]}
-            {carClass ? ` · ${CAR_CLASS_LABEL[carClass]}` : ''}
+            {vehicleTierLabel(vehicle)}
             {title ? ` · ${title}` : ''}
             {driver.carPlate ? ` · ${driver.carPlate}` : ''}
           </span>
@@ -710,6 +767,7 @@ const DriverCard: React.FC<{ driver: Driver; onClick: () => void }> = ({ driver,
             <span className="dv-freight-chip"><Truck size={11} /> Freight</span>
           )}
         </div>
+        <ServedTypes served={served} compact />
       </div>
 
       {/* Badge */}
@@ -724,7 +782,8 @@ const DriverCard: React.FC<{ driver: Driver; onClick: () => void }> = ({ driver,
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 type StatusFilter = 'all' | AppStatus;
-type TypeFilter = 'all' | VehicleType;
+/** 'all', 'none' (no vehicle type at all), or a VEHICLE_FILTERS option id. */
+type TypeFilter = string;
 type SortKey = 'newest' | 'oldest' | 'name' | 'type';
 
 const SORT_LABEL: Record<SortKey, string> = {
@@ -808,11 +867,16 @@ export const Drivers: React.FC = () => {
     rejected: drivers.filter(d => getStatus(d) === 'rejected').length,
   };
 
+  // Counted against the normalised vehicle so legacy records land in the same
+  // bucket the filter puts them in.
   const typeCounts = drivers.reduce((acc, d) => {
-    const t = getVehicleType(d);
-    acc[t] = (acc[t] || 0) + 1;
+    const v = getVehicle(d);
+    const option = VEHICLE_FILTERS.find(o => matchesVehicleFilter(v, o));
+    const id = option ? option.id : v.vehicleType === 'car' ? 'car_untiered' : 'none';
+    acc[id] = (acc[id] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
+  const unmatchedCount = (typeCounts['none'] || 0) + (typeCounts['car_untiered'] || 0);
 
   const filtered = drivers.filter(d => {
     const q = search.toLowerCase().trim();
@@ -824,14 +888,24 @@ export const Drivers: React.FC = () => {
       || (d.carPlate || '').toLowerCase().includes(q)
       || getVehicleTitle(d).toLowerCase().includes(q);
     const matchStatus = statusFilter === 'all' || getStatus(d) === statusFilter;
-    const matchType = typeFilter === 'all' || getVehicleType(d) === typeFilter;
+    const vehicle = getVehicle(d);
+    const option = VEHICLE_FILTERS.find(o => o.id === typeFilter);
+    const matchType =
+      typeFilter === 'all' ? true
+      : typeFilter === 'none' ? getServedCabtypes(vehicle).length === 0
+      : typeFilter === 'car_untiered' ? vehicle.vehicleType === 'car' && !vehicle.carClass
+      // both buckets at once: nobody here can be sent a passenger request
+      : typeFilter === 'no_feed' ? getServedCabtypes(vehicle).length === 0
+          || (vehicle.vehicleType === 'car' && !vehicle.carClass)
+      : option ? matchesVehicleFilter(vehicle, option)
+      : true;
     return matchSearch && matchStatus && matchType;
   });
 
   const sorted = [...filtered].sort((a, b) => {
     if (sort === 'name') return (a.fullName || '').localeCompare(b.fullName || '');
     if (sort === 'type') {
-      const t = VEHICLE_TYPE_LABEL[getVehicleType(a)].localeCompare(VEHICLE_TYPE_LABEL[getVehicleType(b)]);
+      const t = vehicleTierLabel(getVehicle(a)).localeCompare(vehicleTierLabel(getVehicle(b)));
       return t !== 0 ? t : (a.fullName || '').localeCompare(b.fullName || '');
     }
     // legacy records have no submittedAt and sort to the bottom of "newest"
@@ -864,13 +938,19 @@ export const Drivers: React.FC = () => {
       <div className="dv-control-row">
         <label className="dv-select-wrap">
           <Car size={14} />
-          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value as TypeFilter)}>
+          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
             <option value="all">All vehicle types ({drivers.length})</option>
-            {VEHICLE_TYPES.map(t => (
-              <option key={t} value={t}>{VEHICLE_TYPE_LABEL[t]} ({typeCounts[t] || 0})</option>
+            {VEHICLE_FILTERS.map(o => (
+              <option key={o.id} value={o.id}>{o.label} ({typeCounts[o.id] || 0})</option>
             ))}
-            {typeCounts['unknown'] > 0 && (
-              <option value="unknown">{VEHICLE_TYPE_LABEL['unknown']} ({typeCounts['unknown']})</option>
+            {typeCounts['car_untiered'] > 0 && (
+              <option value="car_untiered">Car · tier not set ({typeCounts['car_untiered']})</option>
+            )}
+            {typeCounts['none'] > 0 && (
+              <option value="none">No vehicle type ({typeCounts['none']})</option>
+            )}
+            {unmatchedCount > 0 && (
+              <option value="no_feed">No passenger requests ({unmatchedCount})</option>
             )}
           </select>
         </label>
@@ -883,6 +963,24 @@ export const Drivers: React.FC = () => {
           </select>
         </label>
       </div>
+
+      {/* Drivers whose vehicle answers leave them matching nothing get no work
+          at all, and nothing else in the portal makes that visible. */}
+      {unmatchedCount > 0 && typeFilter === 'all' && (
+        <div className="dv-feed-warning">
+          <AlertTriangle size={15} />
+          <span>
+            {unmatchedCount} {unmatchedCount === 1 ? 'driver receives' : 'drivers receive'} no
+            passenger requests — no vehicle type, or a car with no tier set.
+          </span>
+          <button
+            className="dv-feed-warning-btn"
+            onClick={() => setTypeFilter('no_feed')}
+          >
+            Show them
+          </button>
+        </div>
+      )}
 
       {/* Search */}
       <div className="users-search-bar" style={{ marginBottom: '1.5rem' }}>
