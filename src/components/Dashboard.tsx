@@ -263,7 +263,7 @@ export const Dashboard: React.FC = () => {
           <StatCard title="iOS Users"        value={stats.users.ios}        icon={<Smartphone />}  color="var(--accent-purple)" onClick={() => navigate('/users?filter=ios')} />
           <StatCard title="Verified Users"   value={stats.users.verified}   icon={<ShieldCheck />} color="var(--accent-green)"  onClick={() => navigate('/users?filter=verified')} />
           <StatCard title="Unverified Users" value={stats.users.unverified} icon={<ShieldAlert />} color="var(--accent-orange)" onClick={() => navigate('/users?filter=unverified')} />
-          <StatCard title="Awaiting Review"  value={stats.users.pending}    icon={<Clock />}       color="var(--accent-cyan)"   onClick={() => navigate('/users?filter=unverified')} />
+          <StatCard title="Awaiting Review"  value={stats.users.pending}    icon={<Clock />}       color="var(--accent-cyan)"   onClick={() => navigate('/users?filter=pending')} />
         </div>
       </div>
 

@@ -17,8 +17,8 @@ Stores customer profile, identity-verification and device/session information.
 | `emailVerified` | `boolean` | Whether the email has been confirmed. |
 | `accountType` | `string` | `"user"` for customers. |
 | `cnic` | `string` | 13-digit CNIC (National ID) number, unformatted. |
-| `idCardFrontUrl` | `string` (URL) | Storage download URL for the CNIC front image. |
-| `idCardBackUrl` | `string` (URL) | Storage download URL for the CNIC back image. |
+| `address` | `string` | User's address, submitted alongside CNIC & phone for verification. |
+| `verificationSubmitted` | `boolean` | `true` once the user has submitted CNIC, address & phone for review. The Admin Portal can only approve/reject a user once this is `true`. |
 | `verificationStatus` | `string` | `unverified` \| `pending` \| `verified` \| `rejected`. **Set by the Admin Portal.** |
 | `devicePlatform` | `string` | `"android"` or `"ios"` — platform at registration. |
 | `devicePlatformVersion` | `string` | OS API level / version string. |

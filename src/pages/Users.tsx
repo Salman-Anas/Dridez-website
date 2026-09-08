@@ -14,7 +14,7 @@ import {
   User, Smartphone, Shield, ShieldCheck, ShieldAlert, ShieldX, X, Navigation,
   CheckCircle, XCircle, Clock, Activity, DollarSign, Mail, Phone,
   Loader, ChevronRight, MapPin, Hash, CreditCard, Calendar, LogIn,
-  Image as ImageIcon, Search, Monitor, RotateCcw, UserCheck, Info
+  Search, Monitor, RotateCcw, UserCheck, Info
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -29,10 +29,10 @@ interface UserProfile {
   email?: string;
   emailVerified?: boolean;
   cnic?: string;
+  address?: string;
   accountType?: string;
   verificationStatus?: string;
-  idCardFrontUrl?: string;
-  idCardBackUrl?: string;
+  verificationSubmitted?: boolean;
   devicePlatform?: string;
   devicePlatformVersion?: string;
   lastLoginPlatform?: string;
@@ -222,35 +222,6 @@ const Detail: React.FC<{
   </div>
 );
 
-/** ID-card thumbnail — click opens the full-size lightbox. */
-const IdCardThumb: React.FC<{ src?: string; label: string; onOpen: (src: string) => void }> = ({ src, label, onOpen }) => {
-  const [err, setErr] = useState(false);
-  if (!src || err) {
-    return (
-      <div className="dv-photo-box dv-photo-empty">
-        <ImageIcon size={20} />
-        <span>{label} — not uploaded</span>
-      </div>
-    );
-  }
-  return (
-    <button type="button" className="dv-photo-box id-photo-box" onClick={() => onOpen(src)} title={`View ${label}`}>
-      <img src={src} alt={label} onError={() => setErr(true)} referrerPolicy="no-referrer" />
-      <span>{label}</span>
-    </button>
-  );
-};
-
-const Lightbox: React.FC<{ src: string; onClose: () => void }> = ({ src, onClose }) => (
-  <div className="lightbox-overlay" onClick={onClose}>
-    <button className="lightbox-close" onClick={onClose}><X size={22} /></button>
-    <img src={src} alt="Document" className="lightbox-img" onClick={e => e.stopPropagation()} referrerPolicy="no-referrer" />
-    <a href={src} target="_blank" rel="noopener noreferrer" className="lightbox-link" onClick={e => e.stopPropagation()}>
-      Open original in new tab
-    </a>
-  </div>
-);
-
 // ─── User Detail Drawer ──────────────────────────────────────────────────────
 
 const UserHistoryDrawer: React.FC<{
@@ -263,7 +234,6 @@ const UserHistoryDrawer: React.FC<{
   const [loading, setLoading] = useState(true);
   const [loadingLogins, setLoadingLogins] = useState(true);
   const [working, setWorking] = useState<Verification | null>(null);
-  const [lightbox, setLightbox] = useState<string | null>(null);
 
   const uid = user.uid || user.id;
   const platform = getPlatform(user);
@@ -322,7 +292,7 @@ const UserHistoryDrawer: React.FC<{
   const completedCount = rides.filter(r => isCompleted(r.status)).length;
   const cancelledCount = rides.filter(r => isCancelled(r.status)).length;
 
-  const hasDocs = Boolean(user.idCardFrontUrl || user.idCardBackUrl);
+  const hasApplied = Boolean(user.verificationSubmitted);
 
   const act = async (status: Verification) => {
     setWorking(status);
@@ -352,23 +322,22 @@ const UserHistoryDrawer: React.FC<{
         </div>
 
         <div className="modal-body">
-          {/* ── Identity documents & verification ── */}
+          {/* ── Identity & verification details ── */}
           <div className="modal-section">
-            <h3 className="modal-section-title"><CreditCard size={16} /> Identity Documents</h3>
-            <div className="modal-details-grid" style={{ marginBottom: '0.9rem' }}>
-              <Detail icon={<CreditCard size={11} />} label="CNIC" value={fmtCnic(user.cnic)} />
+            <h3 className="modal-section-title"><CreditCard size={16} /> Verification Details</h3>
+            <div className="modal-details-grid">
+              <Detail icon={<CreditCard size={11} />} label="CNIC" value={fmtCnic(user.cnic)} mono />
+              <Detail icon={<Phone size={11} />} label="Phone" value={user.phone} />
+              <Detail icon={<MapPin size={11} />} label="Address" value={user.address} full />
               <Detail
                 icon={<Calendar size={11} />}
                 label="Details Submitted"
                 value={user.detailsSubmittedAt ? fmtTime(user.detailsSubmittedAt) : 'Not submitted'}
+                full
               />
             </div>
-            <div className="dv-photo-row">
-              <IdCardThumb src={user.idCardFrontUrl} label="ID Card — Front" onOpen={setLightbox} />
-              <IdCardThumb src={user.idCardBackUrl}  label="ID Card — Back"  onOpen={setLightbox} />
-            </div>
-            {!hasDocs && (
-              <p className="verify-hint"><Info size={12} /> This user has not uploaded any ID documents yet.</p>
+            {!hasApplied && (
+              <p className="verify-hint"><Info size={12} /> This user has not applied for verification yet — CNIC, address &amp; phone are still missing.</p>
             )}
           </div>
 
@@ -552,7 +521,13 @@ const UserHistoryDrawer: React.FC<{
 
           {/* ── Verification actions ── */}
           <div className="verify-action-bar">
-            {verification !== 'verified' ? (
+            {verification === 'verified' ? (
+              <button className="dv-revoke-btn" onClick={() => act('unverified')} disabled={working !== null}>
+                {working === 'unverified'
+                  ? <><Loader size={16} className="spin" /> Revoking…</>
+                  : <><RotateCcw size={16} /> Revoke Verification</>}
+              </button>
+            ) : hasApplied ? (
               <>
                 <button className="dv-verify-btn" onClick={() => act('verified')} disabled={working !== null}>
                   {working === 'verified'
@@ -568,32 +543,23 @@ const UserHistoryDrawer: React.FC<{
                 )}
               </>
             ) : (
-              <button className="dv-revoke-btn" onClick={() => act('unverified')} disabled={working !== null}>
-                {working === 'unverified'
-                  ? <><Loader size={16} className="spin" /> Revoking…</>
-                  : <><RotateCcw size={16} /> Revoke Verification</>}
-              </button>
+              <p className="verify-hint" style={{ justifyContent: 'center' }}>
+                <Info size={12} /> This user hasn&apos;t applied for verification yet — nothing to approve.
+              </p>
             )}
           </div>
-          {!hasDocs && verification !== 'verified' && (
-            <p className="verify-hint" style={{ justifyContent: 'center' }}>
-              <Info size={12} /> Review the ID documents above before approving.
-            </p>
-          )}
         </div>
       </div>
-
-      {lightbox && <Lightbox src={lightbox} onClose={() => setLightbox(null)} />}
     </div>
   );
 };
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type Filter = 'all' | 'android' | 'ios' | 'verified' | 'unverified';
+type Filter = 'all' | 'android' | 'ios' | 'verified' | 'pending' | 'unverified';
 
 const FILTER_LABEL: Record<Filter, string> = {
-  all: 'All', android: 'Android', ios: 'iOS', verified: 'Verified', unverified: 'Unverified',
+  all: 'All', android: 'Android', ios: 'iOS', verified: 'Verified', pending: 'Pending', unverified: 'Unverified',
 };
 
 export const Users: React.FC = () => {
@@ -647,6 +613,7 @@ export const Users: React.FC = () => {
     android: users.filter(u => getPlatform(u) === 'android').length,
     ios: users.filter(u => getPlatform(u) === 'ios').length,
     verified: users.filter(u => getVerification(u) === 'verified').length,
+    pending: users.filter(u => getVerification(u) === 'pending').length,
     unverified: users.filter(u => getVerification(u) !== 'verified').length,
   };
 
@@ -663,6 +630,7 @@ export const Users: React.FC = () => {
       filter === 'android' ? getPlatform(u) === 'android' :
       filter === 'ios' ? getPlatform(u) === 'ios' :
       filter === 'verified' ? getVerification(u) === 'verified' :
+      filter === 'pending' ? getVerification(u) === 'pending' :
       getVerification(u) !== 'verified';
     return matchSearch && matchFilter;
   });

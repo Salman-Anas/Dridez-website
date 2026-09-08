@@ -8,6 +8,8 @@ export interface UserSchemaFields {
   devicePlatform?: string;
   lastLoginPlatform?: string;
   verificationStatus?: string;
+  /** True once the user has submitted their CNIC, address & phone for review. */
+  verificationSubmitted?: boolean;
   /** Legacy fields. */
   os?: string;
   isVerified?: boolean;
@@ -30,8 +32,10 @@ export type Verification = 'verified' | 'pending' | 'rejected' | 'unverified';
 export const getVerification = (u: UserSchemaFields): Verification => {
   const raw = (u.verificationStatus || '').toLowerCase();
   if (raw === 'verified' || raw === 'approved') return 'verified';
-  if (raw === 'pending' || raw === 'in_review' || raw === 'submitted') return 'pending';
   if (raw === 'rejected' || raw === 'declined') return 'rejected';
+  if (raw === 'pending' || raw === 'in_review' || raw === 'submitted') return 'pending';
   if (!raw && u.isVerified) return 'verified';
+  // No explicit status yet, but the user has submitted their CNIC/address/phone for review.
+  if (u.verificationSubmitted) return 'pending';
   return 'unverified';
 };
