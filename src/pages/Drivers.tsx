@@ -16,6 +16,7 @@ import {
   VEHICLE_FILTERS, matchesVehicleFilter, getServedCabtypes, vehicleTierLabel,
   cabtypeLabel, isBookableCabtype, formatPKR,
 } from '../utils/rideTaxonomy';
+import { useAdminLabel } from '../utils/adminAuthContext';
 import {
   CheckCircle, X, Car, Truck, Bike, Bus, Phone, Hash, Shield, ShieldCheck, ShieldX,
   Image as ImageIcon, Images, Star, Navigation, Clock, XCircle, Mail,
@@ -794,6 +795,8 @@ const SORT_LABEL: Record<SortKey, string> = {
 };
 
 export const Drivers: React.FC = () => {
+  // Recorded as `reviewedBy` so a decision can be traced to the admin who made it.
+  const adminLabel = useAdminLabel();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Driver | null>(null);
@@ -823,6 +826,7 @@ export const Drivers: React.FC = () => {
    * approved account. The batch keeps the two from drifting apart.
    */
   const handleDecide = async (driver: Driver, { status, rejectionReason }: Decision) => {
+    // Who decided, for the audit trail the schema expects on these records.
     const uid = getUid(driver, driver.id);
     try {
       const batch = writeBatch(db);
@@ -834,7 +838,7 @@ export const Drivers: React.FC = () => {
         // keep working while records still carry the old schema
         isVerified: status === 'approved',
         reviewedAt: serverTimestamp(),
-        reviewedBy: 'Admin',
+        reviewedBy: adminLabel,
       });
 
       // merge-set rather than update: a missing user document must not abort the

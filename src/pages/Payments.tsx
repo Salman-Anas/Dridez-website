@@ -30,26 +30,41 @@ interface RideDoc {
 interface UserDoc {
   name?: string;
   phone?: string;
-  // Firebase may return these as strings — always read via toNum()
-  walletBalance?: unknown;
-  balance?: unknown;
   email?: string;
+}
+
+/**
+ * What one rider is worth, worked out from their rides.
+ *
+ * Riders have no wallet: `users/{uid}` carries no money field at all and
+ * `wallets/{uid}` is the driver-side prepaid balance that commission is taken
+ * from. Fares are handed to the driver in cash. So the figure that actually
+ * exists for a customer is what they have paid, which is summed here from the
+ * same rides the rest of this page totals — meaning customer spend and Total
+ * Received always reconcile.
+ */
+interface CustomerSpend {
+  id: string;
+  name: string;
+  contact: string;
+  /** Fares on their completed rides, within the selected period. */
+  spent: number;
+  rides: number;
+  /** Value of their cancelled rides — never collected. */
+  cancelled: number;
+  cancelledRides: number;
 }
 
 interface DriverDoc {
   fullName?: string;
   phoneNumber?: string;
-  // Firebase may return these as strings — always read via toNum()
-  walletBalance?: unknown;
-  balance?: unknown;
-  accountBalance?: unknown;
   carMake?: string;
   carModel?: string;
   carPlate?: string;
 }
 
 type TimePeriod = 'today' | 'week' | 'month' | 'year' | 'all' | 'custom';
-type CategoryFilter = 'all' | 'received' | 'cancelled' | 'inprocess' | 'customer-balance' | 'driver-balance';
+type CategoryFilter = 'all' | 'received' | 'cancelled' | 'inprocess' | 'customer-spend';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -246,7 +261,6 @@ const PaymentDetailModal: React.FC<{ ride: RideDoc; onClose: () => void }> = ({ 
               <div className="modal-details-grid">
                 <div className="detail-item"><span className="di-label">Name</span><span className="di-value">{riderInfo.name || '—'}</span></div>
                 <div className="detail-item"><span className="di-label"><Phone size={12} /> Phone</span><span className="di-value">{riderInfo.phone || '—'}</span></div>
-                <div className="detail-item"><span className="di-label"><Wallet size={12} /> Wallet</span><span className="di-value">{formatCurrency(toNum(riderInfo.walletBalance) || toNum(riderInfo.balance))}</span></div>
               </div>
             ) : ride.rider ? (
               <p className="modal-no-data">Customer profile not found (UID: {ride.rider.slice(0, 10)}…)</p>
@@ -266,7 +280,6 @@ const PaymentDetailModal: React.FC<{ ride: RideDoc; onClose: () => void }> = ({ 
               <div className="modal-details-grid">
                 <div className="detail-item"><span className="di-label">Name</span><span className="di-value">{driverInfo.fullName || '—'}</span></div>
                 <div className="detail-item"><span className="di-label"><Phone size={12} /> Phone</span><span className="di-value">{driverInfo.phoneNumber || '—'}</span></div>
-                <div className="detail-item"><span className="di-label"><Wallet size={12} /> Balance</span><span className="di-value">{formatCurrency(toNum(driverInfo.accountBalance) || toNum(driverInfo.walletBalance) || toNum(driverInfo.balance))}</span></div>
                 <div className="detail-item"><span className="di-label">Vehicle</span><span className="di-value">{driverInfo.carMake} {driverInfo.carModel}</span></div>
                 <div className="detail-item"><span className="di-label">Plate</span><span className="di-value">{driverInfo.carPlate || '—'}</span></div>
               </div>
@@ -280,12 +293,16 @@ const PaymentDetailModal: React.FC<{ ride: RideDoc; onClose: () => void }> = ({ 
   );
 };
 
-// ─── Customer Balance Modal ────────────────────────────────────────────────────
+// ─── Customer Spend Modal ────────────────────────────────────────────────────
 
-const CustomerBalanceModal: React.FC<{ users: Array<{ id: string } & UserDoc>; onClose: () => void }> = ({ users, onClose }) => {
-  const uBal = (u: UserDoc) => toNum(u.walletBalance) || toNum(u.balance);
-  const totalBalance = users.reduce((sum, u) => sum + uBal(u), 0);
-  const sorted = [...users].sort((a, b) => uBal(b) - uBal(a));
+const CustomerSpendModal: React.FC<{
+  customers: CustomerSpend[];
+  periodLabel: string;
+  onClose: () => void;
+}> = ({ customers, periodLabel, onClose }) => {
+  const total = customers.reduce((sum, c) => sum + c.spent, 0);
+  const paying = customers.filter(c => c.spent > 0);
+  const sorted = [...customers].sort((a, b) => b.spent - a.spent);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -296,8 +313,10 @@ const CustomerBalanceModal: React.FC<{ users: Array<{ id: string } & UserDoc>; o
               <Users size={20} />
             </div>
             <div>
-              <div className="pay-modal-amount">{formatCurrency(totalBalance)}</div>
-              <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Total Customer Wallet Balance</span>
+              <div className="pay-modal-amount">{formatCurrency(total)}</div>
+              <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                Paid by customers · {periodLabel}
+              </span>
             </div>
           </div>
           <button className="modal-close-btn" onClick={onClose}><X size={20} /></button>
@@ -305,26 +324,29 @@ const CustomerBalanceModal: React.FC<{ users: Array<{ id: string } & UserDoc>; o
 
         <div className="modal-body">
           <div className="modal-section">
-            <h3 className="modal-section-title"><BarChart3 size={16} /> Balance Summary</h3>
+            <h3 className="modal-section-title"><BarChart3 size={16} /> Spend Summary</h3>
             <div className="modal-details-grid">
-              <div className="detail-item"><span className="di-label">Total Customers</span><span className="di-value">{users.length.toLocaleString()}</span></div>
-              <div className="detail-item"><span className="di-label">Total Balance</span><span className="di-value pay-amount-cell">{formatCurrency(totalBalance)}</span></div>
-              <div className="detail-item"><span className="di-label">Avg per Customer</span><span className="di-value">{users.length ? formatCurrency(Math.round(totalBalance / users.length)) : '—'}</span></div>
-              <div className="detail-item"><span className="di-label">With Balance &gt; 0</span><span className="di-value">{users.filter(u => uBal(u) > 0).length}</span></div>
+              <div className="detail-item"><span className="di-label">Paying Customers</span><span className="di-value">{paying.length.toLocaleString()}</span></div>
+              <div className="detail-item"><span className="di-label">Total Paid</span><span className="di-value pay-amount-cell">{formatCurrency(total)}</span></div>
+              <div className="detail-item"><span className="di-label">Avg per Customer</span><span className="di-value">{paying.length ? formatCurrency(Math.round(total / paying.length)) : '—'}</span></div>
+              <div className="detail-item"><span className="di-label">Rides Paid For</span><span className="di-value">{customers.reduce((n, c) => n + c.rides, 0)}</span></div>
             </div>
           </div>
 
           <div className="modal-section">
-            <h3 className="modal-section-title"><Users size={16} /> Top Customers by Balance</h3>
+            <h3 className="modal-section-title"><Users size={16} /> Top Customers by Spend</h3>
             <div className="balance-list">
-              {sorted.slice(0, 50).map((u, i) => (
-                <div key={u.id} className="balance-list-item">
+              {sorted.slice(0, 50).map((c, i) => (
+                <div key={c.id} className="balance-list-item">
                   <div className="bli-rank">{i + 1}</div>
                   <div className="bli-info">
-                    <div className="bli-name">{u.name || 'Unnamed User'}</div>
-                    <div className="bli-sub">{u.phone || u.email || u.id.slice(0, 12) + '…'}</div>
+                    <div className="bli-name">{c.name}</div>
+                    <div className="bli-sub">
+                      {c.contact || c.id.slice(0, 12) + '…'} · {c.rides} ride{c.rides === 1 ? '' : 's'}
+                      {c.cancelledRides > 0 && ` · ${c.cancelledRides} cancelled`}
+                    </div>
                   </div>
-                  <div className="bli-amount">{formatCurrency(uBal(u))}</div>
+                  <div className="bli-amount">{formatCurrency(c.spent)}</div>
                 </div>
               ))}
               {sorted.length > 50 && (
@@ -332,63 +354,16 @@ const CustomerBalanceModal: React.FC<{ users: Array<{ id: string } & UserDoc>; o
               )}
             </div>
           </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ─── Driver Balance Modal ────────────────────────────────────────────────────
-
-const DriverBalanceModal: React.FC<{ drivers: Array<{ id: string } & DriverDoc>; onClose: () => void }> = ({ drivers, onClose }) => {
-  const dBal = (d: DriverDoc) => toNum(d.accountBalance) || toNum(d.walletBalance) || toNum(d.balance);
-  const totalBalance = drivers.reduce((sum, d) => sum + dBal(d), 0);
-  const sorted = [...drivers].sort((a, b) => dBal(b) - dBal(a));
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-drawer pay-modal-drawer" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <div className="modal-title-row">
-            <div className="pay-modal-icon-wrap" style={{ background: 'rgba(8,145,178,0.1)', color: '#0891b2' }}>
-              <Car size={20} />
-            </div>
-            <div>
-              <div className="pay-modal-amount">{formatCurrency(totalBalance)}</div>
-              <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Total Driver Account Balance</span>
-            </div>
-          </div>
-          <button className="modal-close-btn" onClick={onClose}><X size={20} /></button>
-        </div>
-
-        <div className="modal-body">
-          <div className="modal-section">
-            <h3 className="modal-section-title"><BarChart3 size={16} /> Balance Summary</h3>
-            <div className="modal-details-grid">
-              <div className="detail-item"><span className="di-label">Total Drivers</span><span className="di-value">{drivers.length.toLocaleString()}</span></div>
-              <div className="detail-item"><span className="di-label">Total Balance</span><span className="di-value pay-amount-cell">{formatCurrency(totalBalance)}</span></div>
-              <div className="detail-item"><span className="di-label">Avg per Driver</span><span className="di-value">{drivers.length ? formatCurrency(Math.round(totalBalance / drivers.length)) : '—'}</span></div>
-              <div className="detail-item"><span className="di-label">With Balance &gt; 0</span><span className="di-value">{drivers.filter(d => dBal(d) > 0).length}</span></div>
-            </div>
-          </div>
 
           <div className="modal-section">
-            <h3 className="modal-section-title"><Car size={16} /> Top Drivers by Balance</h3>
-            <div className="balance-list">
-              {sorted.slice(0, 50).map((d, i) => (
-                <div key={d.id} className="balance-list-item">
-                  <div className="bli-rank">{i + 1}</div>
-                  <div className="bli-info">
-                    <div className="bli-name">{d.fullName || 'Unnamed Driver'}</div>
-                    <div className="bli-sub">{d.phoneNumber || d.id.slice(0, 12) + '…'} {d.carPlate ? `· ${d.carPlate}` : ''}</div>
-                  </div>
-                  <div className="bli-amount">{formatCurrency(dBal(d))}</div>
-                </div>
-              ))}
-              {sorted.length > 50 && (
-                <div className="balance-list-more">… and {sorted.length - 50} more drivers</div>
-              )}
-            </div>
+            <h3 className="modal-section-title"><Wallet size={16} /> Why there is no wallet balance</h3>
+            <p className="modal-no-data">
+              Riders do not hold a balance in Dridez. A rider pays the fare to the driver in cash at
+              the end of the trip, and no rider wallet exists in the database — the only wallets are
+              the drivers&rsquo; prepaid balances that commission is taken from, shown on the Driver
+              Accounts page. What a customer is worth is therefore what they have paid, which is
+              what this list ranks.
+            </p>
           </div>
         </div>
       </div>
@@ -401,13 +376,11 @@ const DriverBalanceModal: React.FC<{ drivers: Array<{ id: string } & DriverDoc>;
 export const Payments: React.FC = () => {
   const [rides, setRides] = useState<RideDoc[]>([]);
   const [users, setUsers] = useState<Array<{ id: string } & UserDoc>>([]);
-  const [drivers, setDrivers] = useState<Array<{ id: string } & DriverDoc>>([]);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<TimePeriod>('all');
   const [category, setCategory] = useState<CategoryFilter>('all');
   const [selectedRide, setSelectedRide] = useState<RideDoc | null>(null);
-  const [showCustomerBalance, setShowCustomerBalance] = useState(false);
-  const [showDriverBalance, setShowDriverBalance] = useState(false);
+  const [showCustomerSpend, setShowCustomerSpend] = useState(false);
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
 
@@ -419,15 +392,6 @@ export const Payments: React.FC = () => {
       const list: Array<{ id: string } & UserDoc> = [];
       snap.forEach(d => list.push({ id: d.id, ...d.data() as UserDoc }));
       setUsers(list);
-    } catch { /* silent */ }
-  }, []);
-
-  const loadDrivers = useCallback(async () => {
-    try {
-      const snap = await getDocs(collection(db, 'driverProfileRequests'));
-      const list: Array<{ id: string } & DriverDoc> = [];
-      snap.forEach(d => list.push({ id: d.id, ...d.data() as DriverDoc }));
-      setDrivers(list);
     } catch { /* silent */ }
   }, []);
 
@@ -482,13 +446,13 @@ export const Payments: React.FC = () => {
     };
 
     onValue(rtdbRef, handleRtdb);
-    Promise.all([loadUsers(), loadDrivers()]);
+    void loadUsers();
 
     return () => {
       mounted = false;
       off(rtdbRef, 'value', handleRtdb);
     };
-  }, [loadFirestoreRides, loadCitytocity, loadUsers, loadDrivers]);
+  }, [loadFirestoreRides, loadCitytocity, loadUsers]);
 
   // ── Filtering ─────────────────────────────────────────────────────────────
 
@@ -512,16 +476,53 @@ export const Payments: React.FC = () => {
   const inProcessRides = periodRides.filter(r => isInProcess(r.status));
 
   const ridePrice = (r: RideDoc) => toNum(r.price);
-  const userBal = (u: { walletBalance?: unknown; balance?: unknown }) => toNum(u.walletBalance) || toNum(u.balance);
-  const driverBal = (d: { accountBalance?: unknown; walletBalance?: unknown; balance?: unknown }) =>
-    toNum(d.accountBalance) || toNum(d.walletBalance) || toNum(d.balance);
 
   const receivedTotal = receivedRides.reduce((s, r) => s + ridePrice(r), 0);
   const cancelledTotal = cancelledRides.reduce((s, r) => s + ridePrice(r), 0);
   const inProcessTotal = inProcessRides.reduce((s, r) => s + ridePrice(r), 0);
 
-  const totalCustomerBalance = users.reduce((s, u) => s + userBal(u), 0);
-  const totalDriverBalance = drivers.reduce((s, d) => s + driverBal(d), 0);
+  /**
+   * Who paid what, over the same period-filtered rides the cards above total.
+   * Built from `receivedRides` and `cancelledRides` rather than from a user
+   * field, because no rider balance exists to read — see CustomerSpend.
+   */
+  const customerSpend: CustomerSpend[] = (() => {
+    const userById = new Map(users.map(u => [u.id, u]));
+    const byUid = new Map<string, CustomerSpend>();
+
+    const rowFor = (uid: string): CustomerSpend => {
+      let row = byUid.get(uid);
+      if (!row) {
+        const u = userById.get(uid);
+        row = {
+          id: uid,
+          // a rider whose account was deleted still has rides on record
+          name: u?.name?.trim() || 'Deleted or unknown customer',
+          contact: u?.phone || u?.email || '',
+          spent: 0, rides: 0, cancelled: 0, cancelledRides: 0,
+        };
+        byUid.set(uid, row);
+      }
+      return row;
+    };
+
+    for (const r of receivedRides) {
+      if (!r.rider) continue;
+      const row = rowFor(r.rider);
+      row.spent += ridePrice(r);
+      row.rides += 1;
+    }
+    for (const r of cancelledRides) {
+      if (!r.rider) continue;
+      const row = rowFor(r.rider);
+      row.cancelled += ridePrice(r);
+      row.cancelledRides += 1;
+    }
+    return [...byUid.values()].sort((a, b) => b.spent - a.spent);
+  })();
+
+  const totalCustomerSpend = customerSpend.reduce((s, c) => s + c.spent, 0);
+  const payingCustomers = customerSpend.filter(c => c.spent > 0).length;
 
   // Rides to show in table
   const tableRides: RideDoc[] = (() => {
@@ -568,28 +569,16 @@ export const Payments: React.FC = () => {
       trend: null,
     },
     {
-      key: 'customer-balance' as CategoryFilter,
-      label: 'Customer Balance',
-      sublabel: 'Total wallet spending power',
-      amount: totalCustomerBalance,
-      count: users.length,
+      key: 'customer-spend' as CategoryFilter,
+      label: 'Customer Spend',
+      sublabel: 'Fares paid by riders, in cash',
+      amount: totalCustomerSpend,
+      count: payingCustomers,
       color: '#4f46e5',
       bg: 'rgba(79,70,229,0.08)',
       icon: <Users size={24} />,
       trend: null,
-      onClick: () => { setShowCustomerBalance(true); setCategory('customer-balance'); },
-    },
-    {
-      key: 'driver-balance' as CategoryFilter,
-      label: 'Driver Balance',
-      sublabel: 'Amount held in driver accounts',
-      amount: totalDriverBalance,
-      count: drivers.length,
-      color: '#0891b2',
-      bg: 'rgba(8,145,178,0.08)',
-      icon: <Car size={24} />,
-      trend: null,
-      onClick: () => { setShowDriverBalance(true); setCategory('driver-balance'); },
+      onClick: () => { setShowCustomerSpend(true); setCategory('customer-spend'); },
     },
   ];
 
@@ -609,7 +598,7 @@ export const Payments: React.FC = () => {
       {/* Header */}
       <div className="dashboard-header" style={{ textAlign: 'left', marginBottom: '2rem' }}>
         <h1>Payments</h1>
-        <p>Financial overview — received, cancelled, in-process, and balance analytics</p>
+        <p>Financial overview — fares received, cancelled and in process, and what each customer paid</p>
       </div>
 
       {/* Time Period Filter */}
@@ -659,7 +648,7 @@ export const Payments: React.FC = () => {
             <div className="psc-meta">
               {loading
                 ? <span className="loading-pulse" style={{ height: '0.85rem', width: '4rem', display: 'inline-block' }} />
-                : <>{card.key === 'customer-balance' ? `${card.count} customers` : card.key === 'driver-balance' ? `${card.count} drivers` : `${card.count} rides`}</>
+                : <>{card.key === 'customer-spend' ? `${card.count} customers` : `${card.count} rides`}</>
               }
               <span className="psc-sublabel">{card.sublabel}</span>
             </div>
@@ -691,17 +680,10 @@ export const Payments: React.FC = () => {
             <div className="pay-kpi-value">{loading ? '…' : formatCurrency(cancelledTotal)}</div>
           </div>
         </div>
-        <div className="pay-kpi-card">
-          <div className="pay-kpi-icon" style={{ color: '#d97706' }}><Wallet size={20} /></div>
-          <div>
-            <div className="pay-kpi-label">Float in System</div>
-            <div className="pay-kpi-value">{loading ? '…' : formatCurrency(totalCustomerBalance + totalDriverBalance)}</div>
-          </div>
-        </div>
       </div>
 
       {/* Table Section */}
-      {category !== 'customer-balance' && category !== 'driver-balance' && (
+      {category !== 'customer-spend' && (
         <>
           <div className="rides-table-header" style={{ marginTop: '2rem' }}>
             <span className="rides-table-title">
@@ -774,48 +756,39 @@ export const Payments: React.FC = () => {
       )}
 
       {/* Balance panels for customer/driver */}
-      {category === 'customer-balance' && !showCustomerBalance && (
+      {category === 'customer-spend' && !showCustomerSpend && (
         <div className="pay-balance-panel">
           <div className="pay-balance-panel-header">
             <Shield size={18} style={{ color: '#4f46e5' }} />
-            Customer Balance Overview
+            Customer Spend Overview
             <button className="clear-filter-btn" onClick={() => setCategory('all')}><X size={14} /> Clear</button>
           </div>
           <div className="pay-balance-quick">
-            <div className="pay-bq-stat"><span className="pay-bq-val">{users.length}</span><span className="pay-bq-lbl">Total Customers</span></div>
-            <div className="pay-bq-stat"><span className="pay-bq-val">{formatCurrency(totalCustomerBalance)}</span><span className="pay-bq-lbl">Total Wallet Balance</span></div>
-            <div className="pay-bq-stat"><span className="pay-bq-val">{users.filter(u => (toNum(u.walletBalance) || toNum(u.balance)) > 0).length}</span><span className="pay-bq-lbl">Customers with Balance</span></div>
-            <div className="pay-bq-stat"><span className="pay-bq-val">{users.length ? formatCurrency(Math.round(totalCustomerBalance / users.length)) : '—'}</span><span className="pay-bq-lbl">Avg Balance</span></div>
+            <div className="pay-bq-stat"><span className="pay-bq-val">{payingCustomers}</span><span className="pay-bq-lbl">Paying Customers</span></div>
+            <div className="pay-bq-stat"><span className="pay-bq-val">{formatCurrency(totalCustomerSpend)}</span><span className="pay-bq-lbl">Total Paid</span></div>
+            <div className="pay-bq-stat"><span className="pay-bq-val">{payingCustomers ? formatCurrency(Math.round(totalCustomerSpend / payingCustomers)) : '—'}</span><span className="pay-bq-lbl">Avg per Customer</span></div>
+            <div className="pay-bq-stat"><span className="pay-bq-val">{customerSpend.reduce((n, c) => n + c.rides, 0)}</span><span className="pay-bq-lbl">Rides Paid For</span></div>
           </div>
-          <button className="pay-view-all-btn" onClick={() => setShowCustomerBalance(true)}>
-            <Users size={16} /> View All Customer Balances
-          </button>
-        </div>
-      )}
-
-      {category === 'driver-balance' && !showDriverBalance && (
-        <div className="pay-balance-panel">
-          <div className="pay-balance-panel-header">
-            <Shield size={18} style={{ color: '#0891b2' }} />
-            Driver Balance Overview
-            <button className="clear-filter-btn" onClick={() => setCategory('all')}><X size={14} /> Clear</button>
-          </div>
-          <div className="pay-balance-quick">
-            <div className="pay-bq-stat"><span className="pay-bq-val">{drivers.length}</span><span className="pay-bq-lbl">Total Drivers</span></div>
-            <div className="pay-bq-stat"><span className="pay-bq-val">{formatCurrency(totalDriverBalance)}</span><span className="pay-bq-lbl">Total Account Balance</span></div>
-            <div className="pay-bq-stat"><span className="pay-bq-val">{drivers.filter(d => (toNum(d.accountBalance) || toNum(d.walletBalance) || toNum(d.balance)) > 0).length}</span><span className="pay-bq-lbl">Drivers with Balance</span></div>
-            <div className="pay-bq-stat"><span className="pay-bq-val">{drivers.length ? formatCurrency(Math.round(totalDriverBalance / drivers.length)) : '—'}</span><span className="pay-bq-lbl">Avg Balance</span></div>
-          </div>
-          <button className="pay-view-all-btn" style={{ '--pay-color': '#0891b2' } as React.CSSProperties} onClick={() => setShowDriverBalance(true)}>
-            <Car size={16} /> View All Driver Balances
+          <p className="pay-balance-note">
+            Riders hold no wallet balance — the fare is paid to the driver in cash, so this is what
+            customers have actually paid over the selected period. Driver prepaid balances are on
+            the Driver Accounts page.
+          </p>
+          <button className="pay-view-all-btn" onClick={() => setShowCustomerSpend(true)}>
+            <Users size={16} /> View All Customer Spend
           </button>
         </div>
       )}
 
       {/* Modals */}
       {selectedRide && <PaymentDetailModal ride={selectedRide} onClose={() => setSelectedRide(null)} />}
-      {showCustomerBalance && <CustomerBalanceModal users={users} onClose={() => { setShowCustomerBalance(false); }} />}
-      {showDriverBalance && <DriverBalanceModal drivers={drivers} onClose={() => { setShowDriverBalance(false); }} />}
+      {showCustomerSpend && (
+        <CustomerSpendModal
+          customers={customerSpend}
+          periodLabel={periods.find(p => p.key === period)?.label ?? 'All Time'}
+          onClose={() => { setShowCustomerSpend(false); }}
+        />
+      )}
     </div>
   );
 };

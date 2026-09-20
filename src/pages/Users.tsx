@@ -6,6 +6,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { formatPKR } from '../utils/rideTaxonomy';
+import { useAdminLabel } from '../utils/adminAuthContext';
 import {
   getPlatform, getVerification, platformLabel,
   type Platform, type Verification,
@@ -563,6 +564,8 @@ const FILTER_LABEL: Record<Filter, string> = {
 };
 
 export const Users: React.FC = () => {
+  // Recorded as `verifiedBy` so a decision can be traced to the admin who made it.
+  const adminLabel = useAdminLabel();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
@@ -597,7 +600,7 @@ export const Users: React.FC = () => {
         // legacy flag kept in sync so older clients keep working
         isVerified: status === 'verified',
         verificationUpdatedAt: serverTimestamp(),
-        verifiedBy: 'Admin',
+        verifiedBy: adminLabel,
       });
       const patch = { verificationStatus: status, isVerified: status === 'verified' };
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, ...patch } : u));

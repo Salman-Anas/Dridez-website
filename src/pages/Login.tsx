@@ -1,50 +1,46 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useState } from 'react';
+import { useNavigate, Navigate, Link } from 'react-router-dom';
 import {
-  Shield, User, Lock, Eye, EyeOff, Loader2, AlertCircle, ArrowRight, Smartphone
+  Shield, Mail, Lock, Eye, EyeOff, Loader2, AlertCircle, ArrowRight, KeyRound
 } from 'lucide-react';
-import { loginAdmin, isAuthenticated } from '../utils/auth';
+import { loginAdmin, AdminAuthError } from '../utils/auth';
+import { useAdminAuth } from '../utils/adminAuthContext';
 import './Login.css';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
-  const [username, setUsername] = useState('');
+  const { status } = useAdminAuth();
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // If already authenticated on this device, redirect to dashboard immediately
-  useEffect(() => {
-    if (isAuthenticated()) {
-      navigate('/', { replace: true });
-    }
-  }, [navigate]);
+  // Firebase persists the session itself, so an already-signed-in admin who
+  // lands here goes straight through.
+  if (status === 'admin') {
+    return <Navigate to="/" replace />;
+  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (!username.trim() || !password) {
-      setError('Please enter both username and password.');
+    if (!email.trim() || !password) {
+      setError('Please enter both your admin email and password.');
       return;
     }
 
     setIsLoading(true);
-
     try {
-      // Simulate a subtle network delay for smooth UX transition & brute force mitigation
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
-      const success = await loginAdmin(username, password);
-
-      if (success) {
-        navigate('/', { replace: true });
-      } else {
-        setError('Invalid admin username or password.');
-      }
-    } catch {
-      setError('An unexpected error occurred during authentication.');
+      await loginAdmin(email, password);
+      navigate('/', { replace: true });
+    } catch (err) {
+      setError(
+        err instanceof AdminAuthError
+          ? err.message
+          : 'An unexpected error occurred during authentication.',
+      );
     } finally {
       setIsLoading(false);
     }
@@ -74,34 +70,34 @@ export const Login: React.FC = () => {
         )}
 
         <form className="login-form" onSubmit={handleLogin}>
-          {/* Username input */}
+          {/* Email input */}
           <div className="login-input-group">
-            <label htmlFor="admin-username" className="login-label">
-              Admin Username
+            <label htmlFor="admin-email" className="login-label">
+              Admin Email
             </label>
             <div className="login-input-wrapper">
               <input
-                id="admin-username"
-                type="text"
+                id="admin-email"
+                type="email"
                 className="login-input"
-                placeholder="Enter admin username..."
-                value={username}
+                placeholder="admin@yourdomain.com"
+                value={email}
                 onChange={(e) => {
-                  setUsername(e.target.value);
+                  setEmail(e.target.value);
                   if (error) setError('');
                 }}
                 disabled={isLoading}
                 autoComplete="username"
                 autoFocus
               />
-              <User className="login-input-icon" size={18} />
+              <Mail className="login-input-icon" size={18} />
             </div>
           </div>
 
           {/* Password input */}
           <div className="login-input-group">
             <label htmlFor="admin-password" className="login-label">
-              Encrypted Password
+              Password
             </label>
             <div className="login-input-wrapper">
               <input
@@ -129,11 +125,14 @@ export const Login: React.FC = () => {
             </div>
           </div>
 
-          {/* Security Device Notice */}
+          {/* What actually grants access */}
           <div className="login-security-notice">
-            <Smartphone size={18} style={{ flexShrink: 0, color: '#818cf8' }} />
+            <KeyRound size={18} style={{ flexShrink: 0, color: '#818cf8' }} />
             <span>
-              <strong>Device Auth Protected:</strong> Active sessions are cryptographically bound to this device. Logging in from a new device will require re-authentication.
+              <strong>Firebase Auth:</strong> sign in with a Firebase account that carries the{' '}
+              <span className="mono">admin</span> claim. The database rules refuse every read and
+              write from any other account, so an ordinary rider or driver login will not open the
+              portal.
             </span>
           </div>
 
@@ -141,12 +140,12 @@ export const Login: React.FC = () => {
           <button
             type="submit"
             className="login-submit-btn"
-            disabled={isLoading || !username || !password}
+            disabled={isLoading || !email || !password}
           >
             {isLoading ? (
               <>
                 <Loader2 size={20} className="spinner-icon" />
-                <span>Decrypting Credentials...</span>
+                <span>Signing in…</span>
               </>
             ) : (
               <>

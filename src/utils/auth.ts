@@ -1,187 +1,139 @@
-// ─── Dridez Admin Portal Auth Utilities ───────────────────────────────────────
+// ─── Dridez Admin Portal Auth ────────────────────────────────────────────────
+// The portal used to check a username and a password hash in the browser and
+// then talk to Firebase anonymously. The security rules refuse that outright:
+// nothing in Firestore or the Realtime Database is readable or writable unless
+// the caller is signed in to Firebase Auth, and only a user whose ID token
+// carries the custom claim `admin: true` may read and write everything the
+// portal touches (schema.md section 7).
+//
+// So authentication is Firebase Auth, and authorisation is that one claim.
+// There is no local session to forge: signing in with a real account that
+// lacks the claim gets you signed straight back out, because every request
+// that account made would be refused by the rules anyway.
 
-const SESSION_KEY = 'dridez_admin_session';
+import {
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+  type User,
+} from 'firebase/auth';
+import { auth } from '../firebase';
 
-// Correct SHA-256 cryptographic hash of "Admin@123" in hexadecimal:
-// e86f78a8a3caf0b60d8e74e5942aa6d86dc150cd3c03338aef25b7d2d7e3acc7
-const ENCRYPTED_ADMIN_HASH = 'e86f78a8a3caf0b60d8e74e5942aa6d86dc150cd3c03338aef25b7d2d7e3acc7';
+/** The claim the `setAdmin.js` script in the app repo grants. */
+const ADMIN_CLAIM = 'admin';
 
-interface AdminSession {
-  token: string;
-  username: string;
-  deviceFingerprint: string;
-  loginTimestamp: number;
-  expiresAt: number;
+export type AdminAuthStatus =
+  /** Firebase has not yet restored (or rejected) a persisted session. */
+  | 'loading'
+  /** Nobody is signed in. */
+  | 'signed-out'
+  /** A real account is signed in, but it does not carry `admin: true`. */
+  | 'not-admin'
+  /** Signed in and authorised. */
+  | 'admin';
+
+export interface AdminAuthState {
+  status: AdminAuthStatus;
+  user: User | null;
+  /** Who to record as `verifiedBy` / `reviewedBy` / `by` on portal writes. */
+  adminEmail: string | null;
 }
 
-function sha256PureJS(ascii: string): string {
-  function rightRotate(value: number, amount: number): number {
-    return (value >>> amount) | (value << (32 - amount));
+export const INITIAL_AUTH_STATE: AdminAuthState = {
+  status: 'loading',
+  user: null,
+  adminEmail: null,
+};
+
+/** Error codes the login form turns into something a person can act on. */
+export class AdminAuthError extends Error {
+  readonly code: string;
+
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = 'AdminAuthError';
+    this.code = code;
   }
-
-  const mathPow = Math.pow;
-  const maxWord = mathPow(2, 32);
-  const lengthProperty = 'length';
-  let i, j;
-
-  const words: number[] = [];
-  const asciiBitLength = ascii[lengthProperty] * 8;
-  let hash: number[] = [];
-  const k: number[] = [];
-  let primeCounter = 0;
-
-  const isComposite: { [key: number]: boolean } = {};
-  for (let candidate = 2; primeCounter < 64; candidate++) {
-    if (!isComposite[candidate]) {
-      for (i = 0; i < 313; i += candidate) {
-        isComposite[i] = true;
-      }
-      hash[primeCounter] = (mathPow(candidate, .5) * maxWord) | 0;
-      k[primeCounter++] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
-    }
-  }
-
-  ascii += '\x80';
-  while (ascii[lengthProperty] % 64 - 56) ascii += '\x00';
-  for (i = 0; i < ascii[lengthProperty]; i++) {
-    j = ascii.charCodeAt(i);
-    if (j >> 8) return ''; // ASCII check
-    words[i >> 2] |= j << ((3 - i) % 4) * 8;
-  }
-  words[words[lengthProperty]] = ((asciiBitLength / maxWord) | 0);
-  words[words[lengthProperty]] = (asciiBitLength) | 0;
-
-  for (j = 0; j < words[lengthProperty]; j += 16) {
-    const w = words.slice(j, j + 16);
-    const oldHash = hash.slice(0);
-    for (i = 0; i < 64; i++) {
-      let w15_val = w[i - 15] || 0;
-      let w2_val = w[i - 2] || 0;
-      const s0 = rightRotate(w15_val, 7) ^ rightRotate(w15_val, 18) ^ (w15_val >>> 3);
-      const s1 = rightRotate(w2_val, 17) ^ rightRotate(w2_val, 19) ^ (w2_val >>> 10);
-      const ch = (hash[4] & hash[5]) ^ (~hash[4] & hash[6]);
-      const maj = (hash[0] & hash[1]) ^ (hash[0] & hash[2]) ^ (hash[1] & hash[2]);
-      const temp1 = (hash[7] + (rightRotate(hash[4], 6) ^ rightRotate(hash[4], 11) ^ rightRotate(hash[4], 25)) + ch + k[i] + (w[i] = (i < 16) ? w[i] : (w[i - 16] + s0 + w[i - 7] + s1) | 0)) | 0;
-      const temp2 = ((rightRotate(hash[0], 2) ^ rightRotate(hash[0], 13) ^ rightRotate(hash[0], 22)) + maj) | 0;
-
-      hash = [(temp1 + temp2) | 0].concat(hash);
-      hash[4] = (hash[4] + temp1) | 0;
-      hash.pop();
-    }
-    for (i = 0; i < 8; i++) {
-      hash[i] = (hash[i] + oldHash[i]) | 0;
-    }
-  }
-
-  let hexOutput = '';
-  for (i = 0; i < 8; i++) {
-    for (j = 3; j >= 0; j--) {
-      const b = (hash[i] >> (8 * j)) & 255;
-      hexOutput += (b + 256).toString(16).substring(1);
-    }
-  }
-  return hexOutput;
 }
 
 /**
- * Encrypts / hashes a raw password string using native Web Crypto API when available,
- * gracefully falling back to a pure JS SHA-256 implementation if necessary.
+ * Does this signed-in user carry the admin claim?
+ *
+ * `forceRefresh` re-fetches the ID token rather than using the cached one. A
+ * claim granted after the session started otherwise takes up to an hour to
+ * appear, which looks exactly like a broken login to whoever was just made an
+ * admin — so the sign-in path always forces a refresh.
  */
-export async function hashPassword(password: string): Promise<string> {
+export async function hasAdminClaim(user: User, forceRefresh = false): Promise<boolean> {
+  const { claims } = await user.getIdTokenResult(forceRefresh);
+  return claims[ADMIN_CLAIM] === true;
+}
+
+const SIGN_IN_ERRORS: Record<string, string> = {
+  'auth/invalid-email': 'That does not look like an email address.',
+  'auth/user-disabled': 'This account has been disabled.',
+  'auth/user-not-found': 'Incorrect email or password.',
+  'auth/wrong-password': 'Incorrect email or password.',
+  'auth/invalid-credential': 'Incorrect email or password.',
+  'auth/too-many-requests': 'Too many attempts. Wait a few minutes and try again.',
+  'auth/network-request-failed': 'Could not reach Firebase. Check your connection.',
+  'auth/operation-not-allowed': 'Email/password sign-in is disabled for this Firebase project.',
+};
+
+/**
+ * Sign in and confirm the admin claim. A non-admin account is signed out again
+ * before this returns, so no part of the portal ever runs against a session
+ * whose every request the rules would refuse.
+ */
+export async function loginAdmin(email: string, password: string): Promise<User> {
+  let user: User;
   try {
-    if (typeof crypto !== 'undefined' && crypto?.subtle?.digest) {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(password);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-  } catch {
-    // If crypto.subtle fails due to HTTP network origin restrictions, fallback below
+    const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
+    user = credential.user;
+  } catch (e) {
+    const code = (e as { code?: string })?.code ?? 'auth/unknown';
+    throw new AdminAuthError(SIGN_IN_ERRORS[code] ?? 'Sign-in failed. Please try again.', code);
   }
-  return sha256PureJS(password);
+
+  if (!(await hasAdminClaim(user, true))) {
+    await signOut(auth);
+    throw new AdminAuthError(
+      'That account exists but is not an admin. Ask someone to run setAdmin.js for it, then sign in again.',
+      'portal/not-an-admin',
+    );
+  }
+
+  return user;
+}
+
+/** Ends the Firebase session on this device. */
+export async function logoutAdmin(): Promise<void> {
+  await signOut(auth);
 }
 
 /**
- * Generates a resilient device fingerprint to ensure session is bound to this device/browser.
- * Uses string hashing to avoid DOMException errors caused by special characters in btoa().
+ * Subscribe to the signed-in admin. Fires once with the restored session (or
+ * `signed-out`) as soon as Firebase has decided, and again on every change.
+ * Returns the unsubscribe function.
  */
-function getDeviceFingerprint(): string {
-  const navigatorInfo = typeof window !== 'undefined' ?
-    `${navigator.userAgent}-${navigator.language}-${window.screen.width}x${window.screen.height}` : 'unknown';
-
-  // Create a clean numeric hash of the device characteristics
-  let hash = 0;
-  for (let i = 0; i < navigatorInfo.length; i++) {
-    const char = navigatorInfo.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return `device_${Math.abs(hash).toString(16)}`;
-}
-
-/**
- * Validates login credentials against encrypted hash and generates a local device session.
- */
-export async function loginAdmin(username: string, passwordRaw: string): Promise<boolean> {
-  // Validate username (Admin)
-  if (username.trim().toLowerCase() !== 'admin') {
-    return false;
-  }
-
-  // Validate encrypted hash against SHA-256("Admin@123")
-  const passwordHash = await hashPassword(passwordRaw);
-  if (passwordHash !== ENCRYPTED_ADMIN_HASH) {
-    return false;
-  }
-
-  // Generate secure device session (expires in 7 days)
-  const now = Date.now();
-  const session: AdminSession = {
-    token: crypto.randomUUID ? crypto.randomUUID() : `dridez_token_${now}_${Math.random().toString(36).substring(2, 10)}`,
-    username: 'Admin',
-    deviceFingerprint: getDeviceFingerprint(),
-    loginTimestamp: now,
-    expiresAt: now + (7 * 24 * 60 * 60 * 1000), // 7 days
-  };
-
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  return true;
-}
-
-/**
- * Checks if the current device has an active, valid, unexpired session token.
- */
-export function isAuthenticated(): boolean {
-  try {
-    const sessionStr = localStorage.getItem(SESSION_KEY);
-    if (!sessionStr) {
-      return false; // New device or cleared session -> require login
+export function watchAdminAuth(onChange: (state: AdminAuthState) => void): () => void {
+  return onAuthStateChanged(auth, user => {
+    if (!user) {
+      onChange({ status: 'signed-out', user: null, adminEmail: null });
+      return;
     }
-
-    const session: AdminSession = JSON.parse(sessionStr);
-
-    // Check expiration
-    if (Date.now() > session.expiresAt) {
-      logoutAdmin();
-      return false;
-    }
-
-    // Ensure device fingerprint matches this device
-    if (session.deviceFingerprint !== getDeviceFingerprint()) {
-      logoutAdmin();
-      return false;
-    }
-
-    return Boolean(session.token && session.username === 'Admin');
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Clears the active admin session from this device.
- */
-export function logoutAdmin(): void {
-  localStorage.removeItem(SESSION_KEY);
+    hasAdminClaim(user)
+      .then(isAdmin => {
+        onChange(
+          isAdmin
+            ? { status: 'admin', user, adminEmail: user.email }
+            : { status: 'not-admin', user, adminEmail: null },
+        );
+      })
+      .catch(() => {
+        // The token could not be read — treat it as unauthorised rather than
+        // letting the portal run against a session the rules will refuse.
+        onChange({ status: 'not-admin', user, adminEmail: null });
+      });
+  });
 }

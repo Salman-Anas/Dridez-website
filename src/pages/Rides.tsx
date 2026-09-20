@@ -1,13 +1,18 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { collection, getDocs, doc, getDoc, query, orderBy } from 'firebase/firestore';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 import { ref, onValue, off } from 'firebase/database';
 import { db, rtdb } from '../firebase';
-import { cabtypeLabel, cabtypeCategory, formatPKR } from '../utils/rideTaxonomy';
+import { RideChat } from '../components/RideChat';
+import {
+  cabtypeLabel, cabtypeCategory, formatPKR, classifyRide, variantAppliesTo,
+  RIDE_VEHICLE_FILTERS, RIDE_VARIANT_FILTERS,
+  type RideVehicle, type RideVariant,
+} from '../utils/rideTaxonomy';
 import {
   Navigation, Clock, CheckCircle, XCircle, AlertCircle,
   Car, Truck, Bike, MapPin, X, User, Phone, Shield,
   Package, Calendar, ChevronRight, Loader, Globe,
-  Activity, Hash, Filter
+  Activity, Hash, Filter, Snowflake, MessageSquare,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -30,12 +35,22 @@ interface Ride {
   price?: number;
   distance?: string | number;
   duration?: string | number;
+  /** Legacy serialised Timestamp; newer rides carry the *At fields below. */
   time?: number | string | { seconds: number };
+  createdAt?: number | { seconds: number };
+  acceptedAt?: number;
+  completedAt?: number;
+  cancelledAt?: number;
+  cancelledBy?: string;
+  /** Locale date string kept on Firestore ride history for display only. */
+  date?: string;
+  commission?: number;
+  commissionRate?: number;
   items?: string;
   when?: string;
   freightSize?: string;
   receiver?: string;
-  passengers?: number;
+  passengers?: number | string;
   detail?: string;
 }
 
@@ -60,6 +75,8 @@ interface DriverInfo {
 
 type FilterType = 'all' | 'active' | 'pending' | 'completed' | 'cancelled';
 type TimePeriod = 'today' | 'week' | 'month' | 'year' | 'all' | 'custom';
+type VehicleFilter = RideVehicle | 'all';
+type VariantFilter = RideVariant | 'all';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -114,13 +131,29 @@ const extractLocation = (loc: unknown): string => {
 const getPickupText  = (pickup:  Ride['pickup'])  => extractLocation(pickup);
 const getDropoffText = (dropoff: Ride['dropoff']) => extractLocation(dropoff);
 
-const getTimestamp = (time: Ride['time']): Date | null => {
-  if (!time) return null;
-  if (typeof time === 'number') return new Date(time > 1e12 ? time : time * 1000);
-  if (typeof time === 'string') return new Date(time);
-  if (typeof time === 'object' && 'seconds' in time) return new Date(time.seconds * 1000);
-  return null;
+/** One timestamp value, whichever of the many shapes it arrives in. */
+const toMs = (v: unknown): number => {
+  if (v === null || v === undefined) return 0;
+  if (typeof v === 'number') return v > 1e12 ? v : v * 1000;
+  if (typeof v === 'string') { const t = Date.parse(v); return Number.isNaN(t) ? 0 : t; }
+  if (typeof v === 'object') {
+    const o = v as { seconds?: number; toDate?: () => Date };
+    if (typeof o.toDate === 'function') return o.toDate().getTime();
+    if (typeof o.seconds === 'number') return o.seconds * 1000;
+  }
+  return 0;
 };
+
+/**
+ * When a ride happened. Live RTDB rides only have `createdAt`; Firestore
+ * history carries `completedAt` or `cancelledAt`; city-to-city has `createdAt`
+ * with a legacy `time` Timestamp on older documents. Reading only `time` — as
+ * this page used to — left almost every ride at epoch zero, which sank them all
+ * to the bottom of the list and hid them from every period filter.
+ */
+const rideMs = (ride: Ride): number =>
+  toMs(ride.completedAt) || toMs(ride.cancelledAt) || toMs(ride.createdAt) ||
+  toMs(ride.acceptedAt) || toMs(ride.time) || toMs(ride.date);
 
 const getPeriodStart = (period: TimePeriod): number => {
   const now = new Date();
@@ -133,15 +166,17 @@ const getPeriodStart = (period: TimePeriod): number => {
   }
 };
 
-const formatTime = (time: Ride['time']): string => {
-  const d = getTimestamp(time);
-  if (!d) return '—';
-  return d.toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' });
+const formatTime = (ride: Ride): string => {
+  const ms = rideMs(ride);
+  if (!ms) return '—';
+  return new Date(ms).toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' });
 };
 
 const normalizeStatus = (status?: string): string => (status || 'unknown').toLowerCase();
 
-const isActive = (s: string) => ['ongoing', 'started', 'active', 'accepted'].includes(s);
+// Status spellings are exact in the app — `inprogress` and `started` for a live
+// in-city trip, `accepted` and `ontrip` for city-to-city.
+const isActive = (s: string) => ['inprogress', 'ongoing', 'started', 'active', 'accepted', 'ontrip'].includes(s);
 const isPending = (s: string) => ['pending', 'searching', 'waiting'].includes(s);
 const isCompleted = (s: string) => ['completed', 'finished', 'done'].includes(s);
 const isCancelled = (s: string) => ['cancelled', 'canceled', 'rejected'].includes(s);
@@ -162,7 +197,7 @@ const isFreightRide = (ride: Ride): boolean =>
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 /** Coloured per ride category, labelled from the taxonomy so both the current
- *  nine cabtypes and the legacy keys in historical rides read correctly. */
+ *  cabtypes and the legacy keys in historical rides read correctly. */
 const TypeBadge: React.FC<{ type: string }> = ({ type }) => {
   const map: Record<string, { color: string; icon: React.ReactNode }> = {
     mini:          { color: '#8b5cf6', icon: <Car size={11} /> },
@@ -197,6 +232,18 @@ const StatusPill: React.FC<{ status: string }> = ({ status }) => {
   return <span className={cls}>{isActive(s) && <span className="blink-dot" />} {label}</span>;
 };
 
+/** The AC / Non-AC / Delivery answer, shown next to the type. */
+const VariantChip: React.FC<{ variant: RideVariant | null }> = ({ variant }) => {
+  if (!variant) return null;
+  if (variant === 'delivery') {
+    return <span className="ride-variant-chip variant-delivery"><Package size={10} /> Delivery</span>;
+  }
+  if (variant === 'ac') {
+    return <span className="ride-variant-chip variant-ac"><Snowflake size={10} /> AC</span>;
+  }
+  return <span className="ride-variant-chip variant-nonac">Non AC</span>;
+};
+
 // ─── Ride Detail Modal ────────────────────────────────────────────────────────
 
 const RideDetailModal: React.FC<{ ride: Ride; onClose: () => void }> = ({ ride, onClose }) => {
@@ -224,6 +271,7 @@ const RideDetailModal: React.FC<{ ride: Ride; onClose: () => void }> = ({ ride, 
 
   const rideType = getRideType(ride);
   const freight = isFreightRide(ride);
+  const { variant } = classifyRide(ride);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -231,6 +279,7 @@ const RideDetailModal: React.FC<{ ride: Ride; onClose: () => void }> = ({ ride, 
         <div className="modal-header">
           <div className="modal-title-row">
             <TypeBadge type={rideType} />
+            <VariantChip variant={variant} />
             <StatusPill status={ride.status || 'unknown'} />
           </div>
           <button className="modal-close-btn" onClick={onClose}><X size={20} /></button>
@@ -263,27 +312,50 @@ const RideDetailModal: React.FC<{ ride: Ride; onClose: () => void }> = ({ ride, 
           <div className="modal-section">
             <h3 className="modal-section-title"><Activity size={16} /> Trip Details</h3>
             <div className="modal-details-grid">
-              <div className="detail-item"><span className="di-label">Fare</span><span className="di-value">{ride.price != null ? formatPKR(ride.price) : '—'}</span></div>
+              <div className="detail-item"><span className="di-label">Fare</span><span className="di-value">{ride.price != null ? formatPKR(Number(ride.price)) : '—'}</span></div>
               <div className="detail-item"><span className="di-label">Distance</span><span className="di-value">{ride.distance ?? '—'}</span></div>
               <div className="detail-item"><span className="di-label">Duration</span><span className="di-value">{ride.duration ?? '—'}</span></div>
-              <div className="detail-item"><span className="di-label">Time</span><span className="di-value">{formatTime(ride.time)}</span></div>
+              <div className="detail-item"><span className="di-label">Time</span><span className="di-value">{formatTime(ride)}</span></div>
+              <div className="detail-item">
+                <span className="di-label">Ride Type</span>
+                <span className="di-value">{rideType === 'intercity' ? 'Inter-City' : cabtypeLabel(rideType)}</span>
+              </div>
+              <div className="detail-item">
+                <span className="di-label">AC / Delivery</span>
+                <span className="di-value">
+                  {variant === 'ac' ? 'AC' : variant === 'nonac' ? 'Non AC' : variant === 'delivery' ? 'Delivery' : 'Not applicable'}
+                </span>
+              </div>
+              {ride.commission != null && (
+                <div className="detail-item">
+                  <span className="di-label">Commission</span>
+                  <span className="di-value">
+                    {formatPKR(ride.commission)}
+                    {ride.commissionRate != null && ` · ${(ride.commissionRate * 100).toFixed(1)}%`}
+                  </span>
+                </div>
+              )}
+              {ride.cancelledBy && (
+                <div className="detail-item"><span className="di-label">Cancelled By</span><span className="di-value">{ride.cancelledBy}</span></div>
+              )}
               {ride.source === 'citytocity' && ride.passengers != null && (
-                <div className="detail-item"><span className="di-label">Passengers</span><span className="di-value">{ride.passengers}</span></div>
+                <div className="detail-item"><span className="di-label">Passengers</span><span className="di-value">{String(ride.passengers)}</span></div>
               )}
               <div className="detail-item"><span className="di-label">Source</span><span className="di-value">{ride.source === 'rtdb' ? 'Realtime DB' : ride.source === 'citytocity' ? 'Inter-City' : 'Firestore'}</span></div>
               <div className="detail-item" style={{ gridColumn: '1 / -1' }}><span className="di-label">Ride ID</span><span className="di-value mono">{ride.id}</span></div>
             </div>
           </div>
 
-          {/* Freight */}
-          {freight && (
+          {/* Delivery / freight payload */}
+          {(freight || variant === 'delivery') && (
             <div className="modal-section">
-              <h3 className="modal-section-title"><Package size={16} /> Freight Details</h3>
+              <h3 className="modal-section-title"><Package size={16} /> Package Details</h3>
               <div className="modal-details-grid">
                 {ride.freightSize && <div className="detail-item"><span className="di-label">Payload Size</span><span className="di-value">{ride.freightSize}</span></div>}
                 {ride.items && <div className="detail-item" style={{ gridColumn: '1 / -1' }}><span className="di-label">Items</span><span className="di-value">{ride.items}</span></div>}
+                {ride.detail && <div className="detail-item" style={{ gridColumn: '1 / -1' }}><span className="di-label">Description</span><span className="di-value">{ride.detail}</span></div>}
                 {ride.when && <div className="detail-item"><span className="di-label">Scheduled For</span><span className="di-value"><Calendar size={13} style={{ display: 'inline', marginRight: 4 }} />{ride.when}</span></div>}
-                {ride.receiver && <div className="detail-item" style={{ gridColumn: '1 / -1' }}><span className="di-label">Receiver Info</span><span className="di-value">{ride.receiver}</span></div>}
+                {ride.receiver && <div className="detail-item" style={{ gridColumn: '1 / -1' }}><span className="di-label">Receiver</span><span className="di-value">{ride.receiver}</span></div>}
               </div>
             </div>
           )}
@@ -351,8 +423,14 @@ const RideDetailModal: React.FC<{ ride: Ride; onClose: () => void }> = ({ ride, 
             )}
           </div>
 
+          {/* Trip chat — rider ↔ driver, live from the Realtime Database */}
+          <div className="modal-section">
+            <h3 className="modal-section-title"><MessageSquare size={16} /> Trip Chat</h3>
+            <RideChat rideId={ride.id} riderUid={ride.rider} driverUid={ride.driver} />
+          </div>
+
           {/* Inter-city detail */}
-          {ride.source === 'citytocity' && ride.detail && (
+          {ride.source === 'citytocity' && ride.detail && !freight && variant !== 'delivery' && (
             <div className="modal-section">
               <h3 className="modal-section-title"><Hash size={16} /> Additional Details</h3>
               <p style={{ color: 'var(--text-secondary)', margin: 0 }}>{ride.detail}</p>
@@ -370,6 +448,8 @@ export const Rides: React.FC = () => {
   const [rides, setRides] = useState<Ride[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterType>('all');
+  const [vehicle, setVehicle] = useState<VehicleFilter>('all');
+  const [variant, setVariant] = useState<VariantFilter>('all');
   const [period, setPeriod] = useState<TimePeriod>('all');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -378,14 +458,9 @@ export const Rides: React.FC = () => {
   const loadFirestoreRides = useCallback(async (): Promise<Ride[]> => {
     const result: Ride[] = [];
     try {
-      const snap = await getDocs(query(collection(db, 'rides'), orderBy('time', 'desc')));
+      const snap = await getDocs(collection(db, 'rides'));
       snap.forEach(d => result.push({ id: d.id, source: 'firestore', ...d.data() } as Ride));
-    } catch {
-      try {
-        const snap = await getDocs(collection(db, 'rides'));
-        snap.forEach(d => result.push({ id: d.id, source: 'firestore', ...d.data() } as Ride));
-      } catch { /* silent */ }
-    }
+    } catch { /* silent */ }
     return result;
   }, []);
 
@@ -422,11 +497,7 @@ export const Rides: React.FC = () => {
             merged.push(r);
           }
         }
-        merged.sort((a, b) => {
-          const ta = getTimestamp(a.time)?.getTime() ?? 0;
-          const tb = getTimestamp(b.time)?.getTime() ?? 0;
-          return tb - ta;
-        });
+        merged.sort((a, b) => rideMs(b) - rideMs(a));
         setRides(merged);
         setLoading(false);
       });
@@ -439,11 +510,15 @@ export const Rides: React.FC = () => {
     };
   }, [loadFirestoreRides, loadCitytocityRides]);
 
+  // ── Filtering ──────────────────────────────────────────────────────────────
+  // The four axes are applied in stages so each filter row can show a count of
+  // what selecting it would actually yield, given everything else chosen.
+
   const periodStart = getPeriodStart(period);
-  const periodRides = rides.filter(r => {
+
+  const periodRides = useMemo(() => rides.filter(r => {
     if (period === 'all') return true;
-    const d = getTimestamp(r.time);
-    const tMs = d ? d.getTime() : 0;
+    const tMs = rideMs(r);
     if (period === 'custom') {
       if (!customStartDate || !customEndDate) return true;
       const start = new Date(customStartDate).getTime();
@@ -452,24 +527,69 @@ export const Rides: React.FC = () => {
       return tMs >= start && tMs <= end.getTime();
     }
     return tMs >= periodStart;
-  });
+  }), [rides, period, periodStart, customStartDate, customEndDate]);
 
-  const counts = {
-    all: periodRides.length,
-    active: periodRides.filter(r => isActive(normalizeStatus(r.status))).length,
-    pending: periodRides.filter(r => isPending(normalizeStatus(r.status))).length,
-    completed: periodRides.filter(r => isCompleted(normalizeStatus(r.status))).length,
-    cancelled: periodRides.filter(r => isCancelled(normalizeStatus(r.status))).length,
-  };
-
-  const filteredRides = filter === 'all' ? periodRides : periodRides.filter(r => {
+  const matchesStatus = useCallback((r: Ride) => {
+    if (filter === 'all') return true;
     const s = normalizeStatus(r.status);
     if (filter === 'active') return isActive(s);
     if (filter === 'pending') return isPending(s);
     if (filter === 'completed') return isCompleted(s);
     if (filter === 'cancelled') return isCancelled(s);
     return true;
-  });
+  }, [filter]);
+
+  const counts = useMemo(() => ({
+    all: periodRides.length,
+    active: periodRides.filter(r => isActive(normalizeStatus(r.status))).length,
+    pending: periodRides.filter(r => isPending(normalizeStatus(r.status))).length,
+    completed: periodRides.filter(r => isCompleted(normalizeStatus(r.status))).length,
+    cancelled: periodRides.filter(r => isCancelled(normalizeStatus(r.status))).length,
+  }), [periodRides]);
+
+  /** Everything the two type filters choose from: period + status applied. */
+  const typePool = useMemo(
+    () => periodRides.filter(matchesStatus),
+    [periodRides, matchesStatus],
+  );
+
+  const classified = useMemo(
+    () => typePool.map(r => ({ ride: r, cls: classifyRide(r) })),
+    [typePool],
+  );
+
+  /** Vehicle counts reflect the variant already chosen, and vice versa. */
+  const vehicleCounts = useMemo(() => {
+    const c: Record<string, number> = { all: 0 };
+    for (const { cls } of classified) {
+      if (variant !== 'all' && cls.variant !== variant) continue;
+      c.all += 1;
+      c[cls.vehicle] = (c[cls.vehicle] || 0) + 1;
+    }
+    return c;
+  }, [classified, variant]);
+
+  const variantCounts = useMemo(() => {
+    const c: Record<string, number> = { all: 0 };
+    for (const { cls } of classified) {
+      if (vehicle !== 'all' && cls.vehicle !== vehicle) continue;
+      c.all += 1;
+      if (cls.variant) c[cls.variant] = (c[cls.variant] || 0) + 1;
+    }
+    return c;
+  }, [classified, vehicle]);
+
+  const filteredRides = useMemo(
+    () => classified
+      .filter(({ cls }) => (vehicle === 'all' || cls.vehicle === vehicle))
+      .filter(({ cls }) => (variant === 'all' || cls.variant === variant))
+      .map(({ ride }) => ride),
+    [classified, vehicle, variant],
+  );
+
+  const typeFiltersActive = vehicle !== 'all' || variant !== 'all';
+
+  const clearAll = () => { setFilter('all'); setVehicle('all'); setVariant('all'); };
 
   const periods: { key: TimePeriod; label: string }[] = [
     { key: 'today', label: 'Today' },
@@ -487,6 +607,15 @@ export const Rides: React.FC = () => {
     { key: 'completed', label: 'Completed',       count: counts.completed, color: 'var(--accent-green)',  icon: <CheckCircle size={22} /> },
     { key: 'cancelled', label: 'Cancelled',       count: counts.cancelled, color: 'var(--accent-red)',    icon: <XCircle size={22} /> },
   ];
+
+  /** "Mini · AC rides", "Delivery rides" — what the table is actually showing. */
+  const tableTitle = (() => {
+    const v = vehicle === 'all' ? null : RIDE_VEHICLE_FILTERS.find(o => o.id === vehicle)?.label;
+    const a = variant === 'all' ? null : RIDE_VARIANT_FILTERS.find(o => o.id === variant)?.label;
+    const status = filter === 'all' ? '' : `${filter.charAt(0).toUpperCase()}${filter.slice(1)} `;
+    const type = [v, a].filter(Boolean).join(' · ');
+    return type ? `${status}${type} rides` : `${status || 'All '}Rides`;
+  })();
 
   return (
     <div className="rides-page">
@@ -519,7 +648,7 @@ export const Rides: React.FC = () => {
         )}
       </div>
 
-      {/* Filter Cards */}
+      {/* Status filter cards */}
       <div className="rides-filter-grid">
         {filterCards.map(card => (
           <button
@@ -540,16 +669,73 @@ export const Rides: React.FC = () => {
         ))}
       </div>
 
+      {/* Ride type — the vehicle the rider asked for */}
+      <div className="ride-filter-block">
+        <div className="ride-filter-label"><Car size={14} /> Ride type</div>
+        <div className="dv-filter-row">
+          <button
+            className={`dv-filter-pill ${vehicle === 'all' ? 'active' : ''}`}
+            onClick={() => setVehicle('all')}
+          >
+            All types
+            <span className="dv-pill-count">{vehicleCounts.all || 0}</span>
+          </button>
+          {RIDE_VEHICLE_FILTERS.map(o => (
+            <button
+              key={o.id}
+              className={`dv-filter-pill ${vehicle === o.id ? 'active' : ''}`}
+              onClick={() => setVehicle(vehicle === o.id ? 'all' : o.id)}
+              title={o.hint}
+            >
+              {o.label}
+              <span className="dv-pill-count">{vehicleCounts[o.id] || 0}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Second axis — the AC answer, or a delivery instead of a passenger */}
+      <div className="ride-filter-block">
+        <div className="ride-filter-label"><Snowflake size={14} /> AC &amp; delivery</div>
+        <div className="dv-filter-row">
+          <button
+            className={`dv-filter-pill ${variant === 'all' ? 'active' : ''}`}
+            onClick={() => setVariant('all')}
+          >
+            Any
+            <span className="dv-pill-count">{variantCounts.all || 0}</span>
+          </button>
+          {RIDE_VARIANT_FILTERS.map(o => {
+            // A rickshaw is never asked about AC and a bike never carries a
+            // passenger in an AC cabin — offering those combinations would only
+            // ever return nothing.
+            const applies = variantAppliesTo(o, vehicle);
+            return (
+              <button
+                key={o.id}
+                className={`dv-filter-pill ${variant === o.id ? 'active' : ''}`}
+                onClick={() => setVariant(variant === o.id ? 'all' : o.id)}
+                disabled={!applies}
+                title={applies ? o.hint : `${o.label} does not apply to ${RIDE_VEHICLE_FILTERS.find(v => v.id === vehicle)?.label ?? 'this type'}`}
+              >
+                {o.label}
+                <span className="dv-pill-count">{variantCounts[o.id] || 0}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Table Header */}
       <div className="rides-table-header">
         <span className="rides-table-title">
           <MapPin size={18} />
-          {filter === 'all' ? 'All Rides' : `${filter.charAt(0).toUpperCase() + filter.slice(1)} Rides`}
+          {tableTitle}
           <span className="rides-count-badge">{filteredRides.length}</span>
         </span>
-        {filter !== 'all' && (
-          <button className="clear-filter-btn" onClick={() => setFilter('all')}>
-            <X size={14} /> Clear filter
+        {(filter !== 'all' || typeFiltersActive) && (
+          <button className="clear-filter-btn" onClick={clearAll}>
+            <X size={14} /> Clear filters
           </button>
         )}
       </div>
@@ -563,7 +749,12 @@ export const Rides: React.FC = () => {
       ) : filteredRides.length === 0 ? (
         <div className="rides-empty">
           <AlertCircle size={40} style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }} />
-          <p>No {filter !== 'all' ? filter : ''} rides found.</p>
+          <p>No rides match these filters.</p>
+          {(filter !== 'all' || typeFiltersActive) && (
+            <button className="clear-filter-btn" onClick={clearAll}>
+              <X size={14} /> Clear filters
+            </button>
+          )}
         </div>
       ) : (
         <div className="rides-table-wrapper">
@@ -571,6 +762,7 @@ export const Rides: React.FC = () => {
             <thead>
               <tr>
                 <th>Type</th>
+                <th>AC / Delivery</th>
                 <th>Status</th>
                 <th>Route</th>
                 <th>Fare</th>
@@ -583,6 +775,11 @@ export const Rides: React.FC = () => {
               {filteredRides.map(ride => (
                 <tr key={ride.id} className="ride-row" onClick={() => setSelectedRide(ride)}>
                   <td><TypeBadge type={getRideType(ride)} /></td>
+                  <td>
+                    {classifyRide(ride).variant
+                      ? <VariantChip variant={classifyRide(ride).variant} />
+                      : <span className="cell-dim">—</span>}
+                  </td>
                   <td><StatusPill status={ride.status || 'unknown'} /></td>
                   <td>
                     <div className="route-cell">
@@ -597,9 +794,9 @@ export const Rides: React.FC = () => {
                       </span>
                     </div>
                   </td>
-                  <td className="cell-fare">{ride.price != null ? formatPKR(ride.price) : '—'}</td>
+                  <td className="cell-fare">{ride.price != null ? formatPKR(Number(ride.price)) : '—'}</td>
                   <td className="cell-dim">{ride.distance ?? '—'}</td>
-                  <td className="cell-dim">{formatTime(ride.time)}</td>
+                  <td className="cell-dim">{formatTime(ride)}</td>
                   <td><ChevronRight size={16} style={{ color: 'var(--text-secondary)' }} /></td>
                 </tr>
               ))}
