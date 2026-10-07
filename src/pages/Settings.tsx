@@ -1,17 +1,17 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { doc, getDoc, setDoc, updateDoc, deleteField } from 'firebase/firestore';
+import React, { useEffect, useState, useCallback } from 'react';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
   CABTYPES, RATE_GROUP_LABEL, RATE_FALLBACK_CHAIN, LEGACY_RATE_KEYS,
   CANONICAL_RATE_KEYS, COMMISSION_KEYS, COMMISSION_META, COMMISSION_CHAIN,
-  resolveRate, resolveCommission, parseRate, formatPKR, computeFare, FARE_BASE,
-  rateKeyImpact, buildRateCleanupPlan,
+  resolveRate, resolveCommission, parseRate, formatPKR, FARE_BASE,
+  baseFareKey, resolveBaseFare, quotedFare,
   type CabtypeMeta, type CommissionKey, type RateGroup, type RatesMap,
 } from '../utils/rideTaxonomy';
 import {
   Car, Truck, Package, Percent, Bike, Snowflake,
   RefreshCw, CheckCircle, AlertCircle, AlertTriangle, Loader,
-  Edit3, X, DollarSign, Check, Trash2, ArrowUpFromLine, ShieldCheck,
+  Edit3, X, DollarSign, Check, Flag,
 } from 'lucide-react';
 
 // ─── Card presentation per cabtype ───────────────────────────────────────────
@@ -49,12 +49,14 @@ interface EditorProps {
   step?: string;
   /** Percentages are stored as decimals; everything else is a plain rate. */
   isPercent?: boolean;
+  /** Base fares accept 0, which the app reads as "no minimum". */
+  allowZero?: boolean;
   onCancel: () => void;
   onSave: (n: number) => void;
 }
 
 const RateEditor: React.FC<EditorProps> = ({
-  value, saving, prefix = 'PKR', suffix = '/ km', step = '5', isPercent, onCancel, onSave,
+  value, saving, prefix = 'PKR', suffix = '/ km', step = '5', isPercent, allowZero, onCancel, onSave,
 }) => {
   const initial = () => {
     const n = parseRate(value);
@@ -66,10 +68,16 @@ const RateEditor: React.FC<EditorProps> = ({
 
   const handleSave = () => {
     const raw = draft.trim();
-    if (!raw) { setError('Enter a rate — an empty value breaks fares for this type'); return; }
+    if (!raw) {
+      setError(allowZero ? 'Enter an amount — 0 for no minimum' : 'Enter a rate — an empty value breaks fares for this type');
+      return;
+    }
     const n = Number(raw);
     if (!Number.isFinite(n)) { setError('Enter a valid number'); return; }
-    if (n <= 0) { setError('Rate must be greater than zero'); return; }
+    if (allowZero ? n < 0 : n <= 0) {
+      setError(allowZero ? 'Cannot be negative — use 0 for no minimum' : 'Rate must be greater than zero');
+      return;
+    }
     if (isPercent && n >= 100) { setError('Commission must be below 100%'); return; }
     setError('');
     onSave(isPercent ? n / 100 : n);
@@ -120,14 +128,25 @@ interface CabtypeCardProps {
   onEdit: () => void;
   onCancel: () => void;
   onSave: (n: number) => void;
+  baseEditing: boolean;
+  baseSaving: boolean;
+  onBaseEdit: () => void;
+  onBaseSave: (n: number) => void;
 }
 
 const CabtypeRateCard: React.FC<CabtypeCardProps> = ({
   meta, rates, editing, saving, onEdit, onCancel, onSave,
+  baseEditing, baseSaving, onBaseEdit, onBaseSave,
 }) => {
   const style = cardStyle(meta);
   const resolved = resolveRate(rates, meta.key);
   const ownValue = parseRate(rates[meta.key]);
+  const baseKey = baseFareKey(meta.key);
+  const baseFare = resolveBaseFare(rates, meta.key);
+  // Trips shorter than this are charged the base fare rather than per km.
+  const minimumUpToKm = resolved.value !== null && baseFare > FARE_BASE
+    ? (baseFare - FARE_BASE) / resolved.value
+    : 0;
 
   const cardClass = [
     'rate-card',
@@ -163,7 +182,7 @@ const CabtypeRateCard: React.FC<CabtypeCardProps> = ({
                 </span>
                 <span className="rate-value-unit">
                   {resolved.value !== null
-                    ? `/ km · ${EXAMPLE_KM} km ≈ ${formatPKR(computeFare(resolved.value, EXAMPLE_KM), { decimals: 2 })}`
+                    ? `/ km · ${EXAMPLE_KM} km ≈ ${formatPKR(quotedFare(resolved.value, EXAMPLE_KM, baseFare), { decimals: 2 })}`
                     : 'riders cannot book this type'}
                 </span>
               </div>
@@ -195,6 +214,43 @@ const CabtypeRateCard: React.FC<CabtypeCardProps> = ({
             )}
           </>
         )}
+
+        {/* Base (minimum) fare — its own key, no fallbacks */}
+        <div className="rate-base">
+          <div className="rate-base-head">
+            <span className="rate-base-label"><Flag size={13} /> Base fare</span>
+            <span className="rate-card-key mono">{baseKey}</span>
+          </div>
+          {baseEditing ? (
+            <RateEditor
+              value={rates[baseKey]}
+              saving={baseSaving}
+              suffix="minimum"
+              step="10"
+              allowZero
+              onCancel={onCancel}
+              onSave={onBaseSave}
+            />
+          ) : (
+            <div className="rate-display-row">
+              <div className="rate-value-wrap">
+                <span className="rate-base-value" style={{ color: baseFare ? style.color : 'var(--text-secondary)' }}>
+                  {baseFare ? formatPKR(baseFare) : 'No minimum'}
+                </span>
+                <span className="rate-value-unit">
+                  {!baseFare
+                    ? 'every trip is charged per km'
+                    : minimumUpToKm > 0
+                      ? `trips up to ~${minimumUpToKm.toFixed(1)} km are charged this`
+                      : 'the least a rider is charged for this type'}
+                </span>
+              </div>
+              <button className="rate-edit-btn" onClick={onBaseEdit} title={`Set the ${baseKey} minimum fare`}>
+                <Edit3 size={14} /> {rates[baseKey] !== undefined ? 'Edit' : 'Set'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -286,61 +342,6 @@ const CommissionCard: React.FC<CommissionCardProps> = ({
   );
 };
 
-// ─── Legacy key card ─────────────────────────────────────────────────────────
-
-interface LegacyCardProps {
-  fieldKey: string;
-  reason: string;
-  value: unknown;
-  rates: RatesMap;
-  deleting: boolean;
-  onDelete: () => void;
-}
-
-const LegacyKeyCard: React.FC<LegacyCardProps> = ({
-  fieldKey, reason, value, rates, deleting, onDelete,
-}) => {
-  const impact = rateKeyImpact(rates, fieldKey);
-  const n = parseRate(value);
-
-  return (
-    <div className={`rate-card legacy-card ${impact.safe ? '' : 'legacy-card-load-bearing'}`}>
-      <div className="rate-card-header">
-        <div className="rate-card-key mono legacy-card-key">{fieldKey}</div>
-        <span className="rate-card-tag legacy-tag">Legacy</span>
-      </div>
-      <div className="rate-card-body">
-        <div className="legacy-value">
-          {n !== null ? n : String(value)}
-          <span className="legacy-value-raw">stored as {typeof value}</span>
-        </div>
-        <div className="rate-card-desc">{reason}</div>
-
-        {impact.safe ? (
-          <div className="rate-status rate-status-ok">
-            <ShieldCheck size={13} /> <span>Nothing reads this — safe to delete.</span>
-          </div>
-        ) : (
-          <div className="rate-status rate-status-warn">
-            <ArrowUpFromLine size={13} />
-            <span>
-              {impact.promotions.map(p => p.label).join(', ')}{' '}
-              {impact.promotions.length === 1 ? 'is' : 'are'} priced from this key. Deleting copies
-              the value onto {impact.promotions.length === 1 ? 'its own key' : 'their own keys'} first,
-              so nothing changes price.
-            </span>
-          </div>
-        )}
-
-        <button className="legacy-delete-btn" onClick={onDelete} disabled={deleting}>
-          {deleting ? <Loader size={14} className="spin" /> : <Trash2 size={14} />}
-          {deleting ? 'Deleting…' : impact.safe ? 'Delete key' : 'Promote & delete'}
-        </button>
-      </div>
-    </div>
-  );
-};
-
 // ─── Main Settings Page Component ────────────────────────────────────────────
 
 /** Keys the portal understands, so anything else can be surfaced as custom. */
@@ -354,9 +355,6 @@ export const Settings: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
-  const [deletingKey, setDeletingKey] = useState<string | null>(null);
-  const [confirmingCleanup, setConfirmingCleanup] = useState(false);
-  const [cleaningUp, setCleaningUp] = useState(false);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
   const showToast = (type: 'success' | 'error', msg: string) => {
@@ -378,9 +376,6 @@ export const Settings: React.FC = () => {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
-
-  /** How to empty the document of legacy keys without moving a single price. */
-  const plan = useMemo(() => buildRateCleanupPlan(rates), [rates]);
 
   /**
    * The document has held both numbers and numeric strings over its life. A key
@@ -408,66 +403,6 @@ export const Settings: React.FC = () => {
     }
   };
 
-  /**
-   * Remove one legacy key. Anything currently priced through it has that price
-   * written onto its own canonical key in the same update, so the two never
-   * land separately and no fare is ever momentarily unset.
-   */
-  const handleDeleteLegacy = async (key: string) => {
-    const impact = rateKeyImpact(rates, key);
-    setDeletingKey(key);
-    try {
-      const patch: Record<string, unknown> = { [key]: deleteField() };
-      for (const p of impact.promotions) patch[p.target] = p.value;
-
-      await updateDoc(doc(db, 'rates', 'rates'), patch);
-
-      setRates(prev => {
-        const next = { ...prev };
-        delete next[key];
-        for (const p of impact.promotions) next[p.target] = p.value;
-        return next;
-      });
-      showToast(
-        'success',
-        impact.promotions.length
-          ? `${key} deleted — ${impact.promotions.map(p => p.target).join(', ')} kept at the same price`
-          : `${key} deleted`,
-      );
-    } catch (e) {
-      console.error(e);
-      showToast('error', `Could not delete ${key}. Nothing was changed.`);
-    } finally {
-      setDeletingKey(null);
-    }
-  };
-
-  /** Remove every legacy key at once, promoting first, in one atomic update. */
-  const handleCleanupAll = async () => {
-    setCleaningUp(true);
-    try {
-      const patch: Record<string, unknown> = {};
-      for (const p of plan.promotions) patch[p.target] = p.value;
-      for (const key of plan.deletions) patch[key] = deleteField();
-
-      await updateDoc(doc(db, 'rates', 'rates'), patch);
-
-      setRates(prev => {
-        const next = { ...prev };
-        for (const p of plan.promotions) next[p.target] = p.value;
-        for (const key of plan.deletions) delete next[key];
-        return next;
-      });
-      setConfirmingCleanup(false);
-      showToast('success', `${plan.deletions.length} legacy keys deleted. Every price is unchanged.`);
-    } catch (e) {
-      console.error(e);
-      showToast('error', 'Cleanup failed. The document was not modified.');
-    } finally {
-      setCleaningUp(false);
-    }
-  };
-
   const groups: RateGroup[] = ['cars', 'delivery', 'other'];
   const broken = CABTYPES.filter(c => resolveRate(rates, c.key).missing);
   const fallbacks = CABTYPES.filter(c => {
@@ -475,10 +410,6 @@ export const Settings: React.FC = () => {
     return !r.missing && r.fromFallback;
   });
 
-  const legacyPresent = useMemo(
-    () => LEGACY_RATE_KEYS.filter(k => rates[k.key] !== undefined),
-    [rates],
-  );
   const extraKeys = Object.keys(rates).filter(k => !KNOWN_KEYS.has(k));
 
   const cardProps = (key: string) => ({
@@ -501,7 +432,7 @@ export const Settings: React.FC = () => {
       <div className="dashboard-header settings-top-bar">
         <div>
           <h1>Platform Settings &amp; Pricing</h1>
-          <p>Per-kilometer rates for the eight ride types the app offers — fare = rate × km + {FARE_BASE}</p>
+          <p>Per-km rates and base fares for the eight ride types — fare = max(rate × km + {FARE_BASE}, base fare)</p>
         </div>
         <button
           className="pay-view-all-btn settings-refresh"
@@ -543,7 +474,7 @@ export const Settings: React.FC = () => {
                   by fallback</strong>
                 <p>
                   {fallbacks.map(f => f.label).join(', ')} — charging a rate borrowed from an older
-                  key. Deleting the legacy keys below copies each of these onto its own key first.
+                  key. Set a rate on the card to price {fallbacks.length === 1 ? 'it' : 'them'} directly.
                 </p>
               </div>
             </div>
@@ -557,7 +488,7 @@ export const Settings: React.FC = () => {
                 <h2 className="section-title">
                   {GROUP_ICON[group]}
                   <span>{RATE_GROUP_LABEL[group]}</span>
-                  <span className="rate-badge-title">Per-Kilometer Rates</span>
+                  <span className="rate-badge-title">Per-km Rates &amp; Base Fares</span>
                 </h2>
                 <div className="rate-cards-grid">
                   {metas.map(meta => (
@@ -566,6 +497,10 @@ export const Settings: React.FC = () => {
                       meta={meta}
                       rates={rates}
                       {...cardProps(meta.key)}
+                      baseEditing={editingKey === baseFareKey(meta.key)}
+                      baseSaving={savingKey === baseFareKey(meta.key)}
+                      onBaseEdit={() => setEditingKey(baseFareKey(meta.key))}
+                      onBaseSave={(n: number) => void handleSave(baseFareKey(meta.key), n)}
                     />
                   ))}
                 </div>
@@ -587,153 +522,6 @@ export const Settings: React.FC = () => {
                 <CommissionCard key={ck} ckey={ck} rates={rates} {...cardProps(ck)} />
               ))}
             </div>
-          </div>
-
-          {/* Legacy keys — to be removed from the document */}
-          <div className="stat-section">
-            <h2 className="section-title">
-              <Trash2 size={22} />
-              <span>Legacy Values</span>
-              <span className="rate-badge-title" style={{ background: 'rgba(220, 38, 38, 0.12)', color: 'var(--accent-red)' }}>
-                {legacyPresent.length} in the document
-              </span>
-            </h2>
-
-            {legacyPresent.length === 0 ? (
-              <div className="rate-alert rate-alert-ok">
-                <ShieldCheck size={20} />
-                <div>
-                  <strong>No legacy values left</strong>
-                  <p>
-                    <span className="mono">rates/rates</span> holds only the keys the current app
-                    reads. Nothing here needs cleaning up.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="legacy-intro">
-                  <p>
-                    Keys written by app versions that no longer exist. They are not edited here
-                    any more — they are removed. Several still sit in a live fallback chain, so a
-                    ride type with no rate of its own may be priced entirely from one of them:
-                    deleting such a key writes its value onto the canonical key in the{' '}
-                    <strong>same update</strong>, so no fare ever changes and no fare is ever
-                    momentarily unset.
-                  </p>
-                </div>
-
-                {/* One action for the whole document */}
-                <div className={`legacy-plan ${plan.wouldBreak.length ? 'legacy-plan-blocked' : ''}`}>
-                  <div className="legacy-plan-head">
-                    <div>
-                      <strong>Delete all {plan.deletions.length} legacy keys</strong>
-                      <p>
-                        {plan.promotions.length > 0
-                          ? `${plan.promotions.length} ${plan.promotions.length === 1 ? 'price is' : 'prices are'} written onto their own key first, then all ${plan.deletions.length} keys are removed — one atomic update.`
-                          : 'Nothing is priced through them, so they can simply be removed.'}
-                      </p>
-                    </div>
-                    {!confirmingCleanup && (
-                      <button
-                        className="legacy-cleanup-btn"
-                        onClick={() => setConfirmingCleanup(true)}
-                        disabled={plan.wouldBreak.length > 0}
-                      >
-                        <Trash2 size={15} /> Review &amp; delete all
-                      </button>
-                    )}
-                  </div>
-
-                  {plan.wouldBreak.length > 0 && (
-                    <div className="rate-status rate-status-error" style={{ marginTop: '0.75rem' }}>
-                      <AlertTriangle size={13} />
-                      <span>
-                        Blocked: <span className="mono">{plan.wouldBreak.join(', ')}</span> would be
-                        left with no value. Set {plan.wouldBreak.length === 1 ? 'it' : 'them'}{' '}
-                        explicitly above first.
-                      </span>
-                    </div>
-                  )}
-
-                  {confirmingCleanup && (
-                    <div className="legacy-confirm">
-                      {plan.promotions.length > 0 && (
-                        <div className="legacy-confirm-block">
-                          <h4><ArrowUpFromLine size={14} /> Written first — prices preserved</h4>
-                          <ul>
-                            {plan.promotions.map(p => (
-                              <li key={p.target}>
-                                <span className="mono">{p.target}</span> ={' '}
-                                <strong>{p.isCommission ? `${(p.value * 100).toFixed(1)}%` : p.value}</strong>
-                                <span className="legacy-confirm-note">({p.label})</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      <div className="legacy-confirm-block">
-                        <h4><Trash2 size={14} /> Deleted permanently</h4>
-                        <ul>
-                          {plan.deletions.map(k => (
-                            <li key={k}>
-                              <span className="mono">{k}</span>
-                              <span className="legacy-confirm-note">
-                                currently {String(rates[k])}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-
-                      {plan.alreadyBroken.length > 0 && (
-                        <div className="rate-status rate-status-warn">
-                          <AlertCircle size={13} />
-                          <span>
-                            <span className="mono">{plan.alreadyBroken.join(', ')}</span> already
-                            {plan.alreadyBroken.length === 1 ? ' has' : ' have'} no value at all.
-                            This cleanup neither causes nor fixes that.
-                          </span>
-                        </div>
-                      )}
-
-                      <p className="legacy-confirm-warn">
-                        <AlertTriangle size={14} /> Deleting fields from{' '}
-                        <span className="mono">rates/rates</span> cannot be undone from the portal.
-                      </p>
-
-                      <div className="rate-edit-actions">
-                        <button
-                          className="legacy-cleanup-btn danger"
-                          onClick={() => { void handleCleanupAll(); }}
-                          disabled={cleaningUp}
-                        >
-                          {cleaningUp ? <Loader size={14} className="spin" /> : <Trash2 size={15} />}
-                          {cleaningUp ? 'Deleting…' : `Delete ${plan.deletions.length} keys`}
-                        </button>
-                        <button className="rate-cancel-btn" onClick={() => setConfirmingCleanup(false)}>
-                          <X size={14} /> Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="rate-cards-grid">
-                  {legacyPresent.map(k => (
-                    <LegacyKeyCard
-                      key={k.key}
-                      fieldKey={k.key}
-                      reason={k.reason}
-                      value={rates[k.key]}
-                      rates={rates}
-                      deleting={deletingKey === k.key}
-                      onDelete={() => { void handleDeleteLegacy(k.key); }}
-                    />
-                  ))}
-                </div>
-              </>
-            )}
           </div>
 
           {/* Keys in the document the portal does not recognise */}
@@ -770,8 +558,10 @@ export const Settings: React.FC = () => {
           <div className="settings-note-box">
             <div className="snb-icon"><AlertCircle size={22} /></div>
             <div className="snb-text">
-              <strong>How the app prices a ride:</strong> fare = <strong>rate × distance in km + {FARE_BASE}</strong>.
-              When a ride type's own key is unset the app walks a fallback chain and takes the first
+              <strong>How the app prices a ride:</strong> fare = <strong>rate × distance in km + {FARE_BASE}</strong>,
+              raised to the type's <strong>base fare</strong> if it comes out lower — riders also cannot offer
+              a custom fare below it. Base fares have no fallbacks; <strong>0</strong> or unset means no minimum.
+              When a ride type's own per-km key is unset the app walks a fallback chain and takes the first
               key with a value above zero — the card shows which key each price is actually coming
               from. Commission is stored as a decimal multiplier (<strong>0.1</strong> ={' '}
               <strong>10%</strong>); enter whole percentages and the portal converts.{' '}

@@ -219,6 +219,24 @@ export const parseRate = (v: unknown): number | null => {
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 
+// ─── Base (minimum) fares ────────────────────────────────────────────────────
+
+/** `base_<cabtype>` — the minimum fare a ride of that type is charged. */
+export const baseFareKey = (key: Cabtype): string => `base_${key}`;
+
+export const BASE_FARE_KEYS: string[] = CABTYPE_KEYS.map(baseFareKey);
+
+/**
+ * The app shows the rider max(per-km price, base fare). Unlike per-km rates
+ * there is no fallback chain: a missing key, or 0, means no minimum.
+ */
+export const resolveBaseFare = (rates: RatesMap, key: Cabtype): number =>
+  parseRate(rates[baseFareKey(key)]) ?? 0;
+
+/** What the rider is quoted for a trip, base fare applied. */
+export const quotedFare = (ratePerKm: number, distanceInKm: number, baseFare: number): number =>
+  Math.max(computeFare(ratePerKm, distanceInKm), baseFare);
+
 /**
  * The fallback chain the app walks when resolving a per-km rate: it takes the
  * first key in the chain with a value > 0.
@@ -307,7 +325,7 @@ export const resolveCommission = (rates: RatesMap, key: CommissionKey): Resolved
 // ─── Legacy rate keys ────────────────────────────────────────────────────────
 
 /** Keys the current app reads by name. These are never deleted. */
-export const CANONICAL_RATE_KEYS: string[] = [...CABTYPE_KEYS, ...COMMISSION_KEYS];
+export const CANONICAL_RATE_KEYS: string[] = [...CABTYPE_KEYS, ...BASE_FARE_KEYS, ...COMMISSION_KEYS];
 
 export interface LegacyRateKeyMeta {
   key: string;

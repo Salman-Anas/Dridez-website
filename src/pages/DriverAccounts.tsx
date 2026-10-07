@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  collection, collectionGroup, doc, getDoc, getDocs,
+  collection, collectionGroup, doc, getDoc, getDocs, onSnapshot,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
@@ -21,6 +21,9 @@ import {
   EMPTY_TOTALS,
   type LedgerEntry, type WalletTotals, type MissedCommission, type BalanceState,
 } from '../utils/walletSchema';
+import { topupStatus, type TopupRequest } from '../utils/topupSchema';
+import { PaymentAccountPanel } from '../components/PaymentAccountPanel';
+import { TopupQueue, type TopupDriverInfo } from '../components/TopupQueue';
 import {
   Wallet, Search, X, Loader, RefreshCw, AlertCircle, AlertTriangle,
   Calendar, Filter, ChevronRight, TrendingUp, TrendingDown, Car, Phone,
@@ -465,6 +468,25 @@ export const DriverAccounts: React.FC = () => {
   const [sort, setSort] = useState<SortKey>('commission_desc');
   const [selected, setSelected] = useState<string | null>(null);
 
+  const [topups, setTopups] = useState<TopupRequest[]>([]);
+  const [topupsLoading, setTopupsLoading] = useState(true);
+  const [topupsError, setTopupsError] = useState('');
+
+  // Live, so a request filed while the page is open shows up without a refresh.
+  useEffect(() => onSnapshot(
+    collection(db, 'topupRequests'),
+    snap => {
+      setTopups(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<TopupRequest, 'id'>) })));
+      setTopupsError('');
+      setTopupsLoading(false);
+    },
+    err => {
+      console.error(err);
+      setTopupsError('Reading topupRequests was refused — confirm your account carries the admin claim.');
+      setTopupsLoading(false);
+    },
+  ), []);
+
   /**
    * The ledger lives in a subcollection under every wallet. One collection
    * group query reads them all; if the security rules only grant the nested
@@ -728,6 +750,15 @@ export const DriverAccounts: React.FC = () => {
 
   const periods = Object.keys(PERIOD_LABEL) as TimePeriod[];
 
+  const topupDrivers = useMemo(() => new Map<string, TopupDriverInfo>(accounts.map(a => [a.uid, {
+    name: a.name, phone: a.phone, balance: a.balance, hasWallet: a.hasWallet,
+  }])), [accounts]);
+
+  const pendingTopupDrivers = useMemo(
+    () => new Set(topups.filter(t => topupStatus(t) === 'pending' && t.driver).map(t => t.driver as string)),
+    [topups],
+  );
+
   return (
     <div className="rides-page">
       <div className="dashboard-header settings-top-bar">
@@ -740,6 +771,16 @@ export const DriverAccounts: React.FC = () => {
           <span>{loading ? 'Loading…' : 'Refresh'}</span>
         </button>
       </div>
+
+      {/* Where drivers send money, and the payments waiting to be verified */}
+      <PaymentAccountPanel />
+      <TopupQueue
+        requests={topups}
+        loading={topupsLoading}
+        error={topupsError}
+        drivers={topupDrivers}
+        onReviewed={() => { void load(); }}
+      />
 
       {/* Period */}
       <div className="pay-period-bar" style={{ marginBottom: '1.25rem' }}>
@@ -904,7 +945,12 @@ export const DriverAccounts: React.FC = () => {
               {visible.map(r => (
                 <tr key={r.account.uid} className="ride-row" onClick={() => setSelected(r.account.uid)}>
                   <td>
-                    <div className="da-driver-name">{r.account.name}</div>
+                    <div className="da-driver-name">
+                      {r.account.name}
+                      {pendingTopupDrivers.has(r.account.uid) && (
+                        <span className="tq-status tq-status-pending" style={{ marginLeft: '0.4rem' }}>Top-up pending</span>
+                      )}
+                    </div>
                     <div className="cell-dim">{r.account.phone || r.account.uid.slice(0, 12) + '…'}</div>
                   </td>
                   <td>
