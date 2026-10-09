@@ -38,10 +38,20 @@ export interface DriverApplicationFields {
   engineCc?: string | number;
   carPlate?: string;
 
-  /** Documents (new schema). */
+  /** Documents (new schema). `licenseImg` is the licence front. */
   licenseImg?: string;
+  /** Licence back — absent on applications submitted before it was asked. */
+  licenseBackImg?: string;
   vehicleImages?: string[];
+  /** In the applicant's name when they own the vehicle, else in the owner's. */
   registrationImg?: string;
+
+  /** "owner" | "driver" (drives for someone else); absent on older applications. */
+  vehicleOwnership?: string;
+  /** Only filled when vehicleOwnership == "driver"; "" otherwise. */
+  ownerName?: string;
+  /** Owner's CNIC, 13 digits without dashes. */
+  ownerCnic?: string;
 
   freight?: boolean;
   status?: string;
@@ -169,8 +179,11 @@ export const getVehicleTitle = (a: DriverApplicationFields): string =>
 
 const clean = (v?: string) => (typeof v === 'string' && v.trim() ? v.trim() : '');
 
-/** Driving licence photo — same field name on both schemas. */
+/** Driving licence front — same field name on both schemas. */
 export const getLicenceImg = (a: DriverApplicationFields): string => clean(a.licenseImg);
+
+/** Driving licence back — only on applications made after it was asked. */
+export const getLicenceBackImg = (a: DriverApplicationFields): string => clean(a.licenseBackImg);
 
 /** Vehicle ownership / registration proof — new schema only. */
 export const getRegistrationImg = (a: DriverApplicationFields): string => clean(a.registrationImg);
@@ -191,8 +204,34 @@ export const getVehicleImages = (a: DriverApplicationFields): string[] => {
 
 /** Every reviewable document on the application, in review order. */
 export const getDocumentCount = (a: DriverApplicationFields): number =>
-  (getLicenceImg(a) ? 1 : 0) + (getRegistrationImg(a) ? 1 : 0) +
+  (getLicenceImg(a) ? 1 : 0) + (getLicenceBackImg(a) ? 1 : 0) + (getRegistrationImg(a) ? 1 : 0) +
   (getCnicImg(a) ? 1 : 0) + getVehicleImages(a).length;
+
+// ─── Vehicle ownership ───────────────────────────────────────────────────────
+
+/** `null` when the application predates the question. */
+export type VehicleOwnership = 'owner' | 'driver';
+
+export const getOwnership = (a: DriverApplicationFields): VehicleOwnership | null => {
+  const raw = (a.vehicleOwnership || '').toLowerCase().trim();
+  return raw === 'owner' || raw === 'driver' ? raw : null;
+};
+
+export const OWNERSHIP_LABEL: Record<VehicleOwnership, string> = {
+  owner: 'Owns the vehicle',
+  driver: 'Drives for the owner',
+};
+
+export const getOwnerName = (a: DriverApplicationFields): string => clean(a.ownerName);
+
+export const getOwnerCnic = (a: DriverApplicationFields): string =>
+  clean(a.ownerCnic).replace(/\D/g, '');
+
+/** 3520212345671 → 35202-1234567-1; anything not 13 digits is shown as stored. */
+export const formatCnic = (raw?: string): string => {
+  const d = (raw || '').replace(/\D/g, '');
+  return d.length === 13 ? `${d.slice(0, 5)}-${d.slice(5, 12)}-${d.slice(12)}` : (raw || '').trim();
+};
 
 // ─── Identity ────────────────────────────────────────────────────────────────
 

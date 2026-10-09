@@ -7,11 +7,16 @@ import { db } from '../firebase';
 import {
   getStatus, getVehicleType, getVehicle, getSeats, isFreight,
   getCompany, getModel, getVariant, getEngineCc, getVehicleTitle,
-  getLicenceImg, getRegistrationImg, getCnicImg, getVehicleImages,
+  getLicenceImg, getLicenceBackImg, getRegistrationImg, getCnicImg, getVehicleImages,
   getDocumentCount, getUid,
-  STATUS_LABEL, VEHICLE_TYPE_LABEL,
+  getOwnership, getOwnerName, getOwnerCnic, formatCnic,
+  STATUS_LABEL, VEHICLE_TYPE_LABEL, OWNERSHIP_LABEL,
   type DriverApplicationFields, type AppStatus, type VehicleType,
 } from '../utils/driverSchema';
+import {
+  useDriverActivity, LIVE_RIDE_STATUS_LABEL, timeAgo,
+  type OnlinePresence, type LiveRide,
+} from '../utils/driverActivity';
 import {
   VEHICLE_FILTERS, matchesVehicleFilter, getServedCabtypes, vehicleTierLabel,
   cabtypeLabel, isBookableCabtype, formatPKR,
@@ -23,6 +28,7 @@ import {
   DollarSign, TrendingUp, Loader, ChevronRight, Search, Armchair, Gauge,
   CreditCard, Calendar, FileText, Activity, MapPin, IdCard, UserCheck,
   Info, ArrowUpDown, Undo2, MessageSquareWarning, Radio, AlertTriangle, Snowflake,
+  Wifi, KeyRound, Route,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -43,8 +49,6 @@ interface UserAccount {
   phone?: string;
   email?: string;
   cnic?: string;
-  idCardFrontUrl?: string;
-  idCardBackUrl?: string;
   verificationStatus?: string;
   driver?: boolean;
   driverApplicationStatus?: string;
@@ -274,6 +278,27 @@ const StarRating: React.FC<{ value: number; max?: number }> = ({ value, max = 5 
   </div>
 );
 
+/** "On a ride" beats "Online" — a driver on a ride is also online. */
+const LiveBadge: React.FC<{ presence?: OnlinePresence; liveRide?: LiveRide; small?: boolean }> = ({ presence, liveRide, small }) => {
+  if (liveRide) {
+    return (
+      <span className="dv-live dv-live-ride" style={small ? { fontSize: '0.68rem' } : undefined}
+            title={LIVE_RIDE_STATUS_LABEL[liveRide.status] || liveRide.status}>
+        <Route size={small ? 10 : 12} /> On a ride
+      </span>
+    );
+  }
+  if (presence) {
+    return (
+      <span className="dv-live dv-live-online" style={small ? { fontSize: '0.68rem' } : undefined}
+            title={`Last location update ${timeAgo(presence.updatedAt)}`}>
+        <span className="dv-live-dot" /> Online
+      </span>
+    );
+  }
+  return null;
+};
+
 // ─── Driver Detail Drawer ─────────────────────────────────────────────────────
 
 interface Decision {
@@ -283,9 +308,11 @@ interface Decision {
 
 const DriverDrawer: React.FC<{
   driver: Driver;
+  presence?: OnlinePresence;
+  liveRide?: LiveRide;
   onClose: () => void;
   onDecide: (driver: Driver, decision: Decision) => Promise<void>;
-}> = ({ driver, onClose, onDecide }) => {
+}> = ({ driver, presence, liveRide, onClose, onDecide }) => {
   const [rides, setRides] = useState<RideRecord[]>([]);
   const [ratings, setRatings] = useState<RatingRecord[]>([]);
   const [account, setAccount] = useState<UserAccount | null>(null);
@@ -304,7 +331,17 @@ const DriverDrawer: React.FC<{
   const served = getServedCabtypes(vehicle);
   const seats = getSeats(driver);
   const licenceImg = getLicenceImg(driver);
+  const licenceBackImg = getLicenceBackImg(driver);
   const registrationImg = getRegistrationImg(driver);
+  const ownership = getOwnership(driver);
+  const ownerName = getOwnerName(driver);
+  const ownerCnic = getOwnerCnic(driver);
+  // Whose name the registration proof has to be in.
+  const registrationHolder = ownership === 'driver'
+    ? ownerName || 'the owner'
+    : driver.fullName || account?.name || 'the applicant';
+  const applicantCnic = (driver.cnicNum || account?.cnic || '').replace(/\D/g, '');
+  const ownerIsApplicant = ownership === 'driver' && ownerCnic !== '' && ownerCnic === applicantCnic;
   const cnicImg = getCnicImg(driver);
   const vehicleImages = getVehicleImages(driver);
   const hasDocs = getDocumentCount(driver) > 0;
@@ -400,11 +437,47 @@ const DriverDrawer: React.FC<{
               <div className="dv-phone"><Phone size={12} /> {driver.phoneNumber || account?.phone || '—'}</div>
             </div>
             <AppStatusBadge status={status} />
+            <LiveBadge presence={presence} liveRide={liveRide} />
           </div>
           <button className="modal-close-btn" onClick={onClose}><X size={20} /></button>
         </div>
 
         <div className="modal-body">
+
+          {/* ── What the driver is doing right now ── */}
+          {liveRide ? (
+            <div className="dv-live-callout dv-live-callout-ride">
+              <Route size={15} />
+              <div>
+                <strong>
+                  {LIVE_RIDE_STATUS_LABEL[liveRide.status] || liveRide.status}
+                  {liveRide.source === 'city_to_city' ? ' · city to city' : liveRide.cabtype ? ` · ${cabtypeLabel(liveRide.cabtype)}` : ''}
+                </strong>
+                <p>
+                  {extractLocation(liveRide.pickup)} → {extractLocation(liveRide.dropoff)}
+                  {toNum(liveRide.price) ? ` · ${formatPKR(toNum(liveRide.price))}` : ''}
+                  {liveRide.since ? ` · since ${timeAgo(liveRide.since)}` : ''}
+                </p>
+                <span className="mono dv-live-id">{liveRide.id}</span>
+              </div>
+            </div>
+          ) : presence ? (
+            <div className="dv-live-callout">
+              <Wifi size={15} />
+              <div>
+                <strong>Online{presence.busy ? ' · busy' : ''}</strong>
+                <p>
+                  Last location update {timeAgo(presence.updatedAt)}
+                  {presence.latitude !== undefined && presence.longitude !== undefined && (
+                    <> · <a
+                      href={`https://www.google.com/maps?q=${presence.latitude},${presence.longitude}`}
+                      target="_blank" rel="noopener noreferrer"
+                    >view on map</a></>
+                  )}
+                </p>
+              </div>
+            </div>
+          ) : null}
 
           {/* ── Rejection reason currently shown to the driver ── */}
           {status === 'rejected' && driver.rejectionReason && (
@@ -438,7 +511,7 @@ const DriverDrawer: React.FC<{
                         : 'CNIC on the application differs from the account CNIC.'}
                   </p>
                 )}
-                <div className="modal-details-grid" style={{ marginBottom: '1rem' }}>
+                <div className="modal-details-grid">
                   <Detail icon={<Hash size={11} />} label="UID" value={uid} mono />
                   <Detail icon={<UserCheck size={11} />} label="Account Name" value={account.name} />
                   <Detail icon={<Phone size={11} />} label="Account Phone" value={account.phone} />
@@ -449,10 +522,6 @@ const DriverDrawer: React.FC<{
                       {account.driver ? 'Unlocked' : 'Locked'}
                     </span>
                   } />
-                </div>
-                <div className="dv-photo-row">
-                  <DocThumb src={account.idCardFrontUrl} label="ID Card — Front" onOpen={setLightbox} />
-                  <DocThumb src={account.idCardBackUrl}  label="ID Card — Back"  onOpen={setLightbox} />
                 </div>
               </>
             )}
@@ -513,9 +582,16 @@ const DriverDrawer: React.FC<{
 
             <h4 className="dv-doc-group">Driving Licence</h4>
             <div className="dv-photo-row">
-              <DocThumb src={licenceImg} label="Driving Licence" onOpen={setLightbox} />
+              <DocThumb src={licenceImg} label="Licence — Front" onOpen={setLightbox} />
+              <DocThumb src={licenceBackImg} label="Licence — Back" onOpen={setLightbox} />
               {cnicImg && <DocThumb src={cnicImg} label="CNIC (legacy upload)" onOpen={setLightbox} />}
             </div>
+            {licenceImg && !licenceBackImg && (
+              <p className="verify-hint">
+                <Info size={12} /> Submitted before the licence back was asked for — the app requests
+                it the next time the driver edits their application.
+              </p>
+            )}
             {(driver.driversLicense || driver.driversLicenseExpiration) && (
               <div className="modal-details-grid" style={{ marginTop: '0.75rem' }}>
                 <Detail icon={<IdCard size={11} />} label="Licence No." value={driver.driversLicense} mono />
@@ -532,10 +608,55 @@ const DriverDrawer: React.FC<{
                   ))}
             </div>
 
+            <h4 className="dv-doc-group"><KeyRound size={12} /> Vehicle Ownership</h4>
+            {ownership === null ? (
+              <p className="verify-hint">
+                <Info size={12} /> Not answered — submitted before the ownership question existed. The
+                app asks for it the next time the driver edits their application.
+              </p>
+            ) : (
+              <div className={`dv-ownership dv-ownership-${ownership}`}>
+                <div className="dv-ownership-head">
+                  <span className="dv-ownership-tag">{OWNERSHIP_LABEL[ownership]}</span>
+                  {ownership === 'owner' && <span className="cell-dim">The applicant is the registered owner</span>}
+                </div>
+                {ownership === 'driver' && (
+                  <div className="modal-details-grid">
+                    <Detail icon={<UserCheck size={11} />} label="Owner Name (as on ID card)" value={ownerName} />
+                    <Detail icon={<CreditCard size={11} />} label="Owner CNIC" value={formatCnic(ownerCnic)} mono />
+                  </div>
+                )}
+                {ownership === 'driver' && (!ownerName || !ownerCnic) && (
+                  <p className="verify-hint dv-mismatch">
+                    <AlertTriangle size={12} /> The owner's {!ownerName && !ownerCnic ? 'name and CNIC are' : !ownerName ? 'name is' : 'CNIC is'} missing.
+                  </p>
+                )}
+                {ownerCnic && ownerCnic.length !== 13 && (
+                  <p className="verify-hint dv-mismatch">
+                    <AlertTriangle size={12} /> Owner CNIC has {ownerCnic.length} digits — a CNIC has 13.
+                  </p>
+                )}
+                {ownerIsApplicant && (
+                  <p className="verify-hint dv-mismatch">
+                    <AlertTriangle size={12} /> Owner CNIC is the applicant's own CNIC — they may own the vehicle after all.
+                  </p>
+                )}
+              </div>
+            )}
+
             <h4 className="dv-doc-group">Registration / Ownership Proof</h4>
             <div className="dv-photo-row">
               <DocThumb src={registrationImg} label="Registration Proof" onOpen={setLightbox} />
             </div>
+            {registrationImg && ownership !== null && (
+              <p className="verify-hint">
+                <Info size={12} />
+                <span>
+                  Should be in <strong>{registrationHolder}</strong>'s name
+                  {ownership === 'driver' && ownerCnic ? <> — CNIC <span className="mono">{formatCnic(ownerCnic)}</span></> : null}.
+                </span>
+              </p>
+            )}
           </div>
 
           {/* ── Application details ── */}
@@ -737,7 +858,12 @@ const DriverDrawer: React.FC<{
 
 // ─── Driver Card (list item) ──────────────────────────────────────────────────
 
-const DriverCard: React.FC<{ driver: Driver; onClick: () => void }> = ({ driver, onClick }) => {
+const DriverCard: React.FC<{
+  driver: Driver;
+  presence?: OnlinePresence;
+  liveRide?: LiveRide;
+  onClick: () => void;
+}> = ({ driver, presence, liveRide, onClick }) => {
   const initials = (driver.fullName || 'D')
     .split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   const status = getStatus(driver);
@@ -767,6 +893,11 @@ const DriverCard: React.FC<{ driver: Driver; onClick: () => void }> = ({ driver,
           {isFreight(driver) && vehicleType !== 'freight' && (
             <span className="dv-freight-chip"><Truck size={11} /> Freight</span>
           )}
+          {getOwnership(driver) === 'driver' && (
+            <span className="dv-freight-chip" title={`Owner: ${getOwnerName(driver) || 'not given'}`}>
+              <KeyRound size={11} /> Not the owner
+            </span>
+          )}
         </div>
         <ServedTypes served={served} compact />
       </div>
@@ -774,6 +905,7 @@ const DriverCard: React.FC<{ driver: Driver; onClick: () => void }> = ({ driver,
       {/* Badge */}
       <div className="dv-card-right">
         <AppStatusBadge status={status} small />
+        <LiveBadge presence={presence} liveRide={liveRide} small />
         <ChevronRight size={16} style={{ color: 'var(--text-secondary)', marginTop: '0.4rem' }} />
       </div>
     </div>
@@ -783,6 +915,8 @@ const DriverCard: React.FC<{ driver: Driver; onClick: () => void }> = ({ driver,
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 type StatusFilter = 'all' | AppStatus;
+/** Live activity, on top of the review status. */
+type ActivityFilter = 'any' | 'online' | 'on_ride';
 /** 'all', 'none' (no vehicle type at all), or a VEHICLE_FILTERS option id. */
 type TypeFilter = string;
 type SortKey = 'newest' | 'oldest' | 'name' | 'type';
@@ -803,7 +937,9 @@ export const Drivers: React.FC = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>('any');
   const [sort, setSort] = useState<SortKey>('newest');
+  const activity = useDriverActivity();
 
   useEffect(() => {
     const fetchDrivers = async () => {
@@ -871,6 +1007,13 @@ export const Drivers: React.FC = () => {
     rejected: drivers.filter(d => getStatus(d) === 'rejected').length,
   };
 
+  const presenceOf = (d: Driver) => activity.online.get(getUid(d, d.id));
+  const rideOf = (d: Driver) => activity.onRide.get(getUid(d, d.id));
+  const activityCounts: Record<Exclude<ActivityFilter, 'any'>, number> = {
+    online: drivers.filter(d => presenceOf(d) || rideOf(d)).length,
+    on_ride: drivers.filter(d => rideOf(d)).length,
+  };
+
   // Counted against the normalised vehicle so legacy records land in the same
   // bucket the filter puts them in.
   const typeCounts = drivers.reduce((acc, d) => {
@@ -890,8 +1033,14 @@ export const Drivers: React.FC = () => {
       || (d.email || '').toLowerCase().includes(q)
       || (d.cnicNum || '').includes(q)
       || (d.carPlate || '').toLowerCase().includes(q)
-      || getVehicleTitle(d).toLowerCase().includes(q);
+      || getVehicleTitle(d).toLowerCase().includes(q)
+      || getOwnerName(d).toLowerCase().includes(q)
+      || (q.replace(/\D/g, '') !== '' && getOwnerCnic(d).includes(q.replace(/\D/g, '')));
     const matchStatus = statusFilter === 'all' || getStatus(d) === statusFilter;
+    const matchActivity =
+      activityFilter === 'any' ? true
+      : activityFilter === 'on_ride' ? Boolean(rideOf(d))
+      : Boolean(presenceOf(d) || rideOf(d));
     const vehicle = getVehicle(d);
     const option = VEHICLE_FILTERS.find(o => o.id === typeFilter);
     const matchType =
@@ -903,7 +1052,7 @@ export const Drivers: React.FC = () => {
           || (vehicle.vehicleType === 'car' && !vehicle.carClass)
       : option ? matchesVehicleFilter(vehicle, option)
       : true;
-    return matchSearch && matchStatus && matchType;
+    return matchSearch && matchStatus && matchType && matchActivity;
   });
 
   const sorted = [...filtered].sort((a, b) => {
@@ -936,7 +1085,31 @@ export const Drivers: React.FC = () => {
             <span className="dv-pill-count">{statusCounts[f]}</span>
           </button>
         ))}
+        <span className="dv-filter-divider" />
+        <button
+          className={`dv-filter-pill dv-filter-live ${activityFilter === 'online' ? 'active' : ''}`}
+          onClick={() => setActivityFilter(a => a === 'online' ? 'any' : 'online')}
+          title="Drivers with a location update in the last 30 minutes, or on a ride"
+        >
+          <span className="dv-live-dot" /> Online now
+          <span className="dv-pill-count">{activity.loading ? '…' : activityCounts.online}</span>
+        </button>
+        <button
+          className={`dv-filter-pill dv-filter-live ${activityFilter === 'on_ride' ? 'active' : ''}`}
+          onClick={() => setActivityFilter(a => a === 'on_ride' ? 'any' : 'on_ride')}
+          title="Heading to a pickup, carrying a rider, or on a city-to-city trip"
+        >
+          <Route size={13} /> In a ride
+          <span className="dv-pill-count">{activity.loading ? '…' : activityCounts.on_ride}</span>
+        </button>
       </div>
+
+      {activity.error && (
+        <div className="dv-feed-warning">
+          <AlertTriangle size={15} />
+          <span>{activity.error}</span>
+        </div>
+      )}
 
       {/* Vehicle type + sort */}
       <div className="dv-control-row">
@@ -991,7 +1164,7 @@ export const Drivers: React.FC = () => {
         <Search size={16} style={{ color: 'var(--text-secondary)' }} />
         <input
           className="users-search-input"
-          placeholder="Search by name, phone, email, CNIC, plate or vehicle…"
+          placeholder="Search by name, phone, email, CNIC, plate, vehicle or owner…"
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
@@ -1008,10 +1181,20 @@ export const Drivers: React.FC = () => {
       ) : (
         <div className="dv-list">
           {sorted.map(driver => (
-            <DriverCard key={driver.id} driver={driver} onClick={() => setSelected(driver)} />
+            <DriverCard
+              key={driver.id}
+              driver={driver}
+              presence={presenceOf(driver)}
+              liveRide={rideOf(driver)}
+              onClick={() => setSelected(driver)}
+            />
           ))}
           {sorted.length === 0 && (
-            <p style={{ color: 'var(--text-secondary)' }}>No applications match your filter.</p>
+            <p style={{ color: 'var(--text-secondary)' }}>
+              {activityFilter === 'on_ride' ? 'No driver is on a ride right now.'
+                : activityFilter === 'online' ? 'No driver is online right now.'
+                : 'No applications match your filter.'}
+            </p>
           )}
         </div>
       )}
@@ -1023,6 +1206,8 @@ export const Drivers: React.FC = () => {
           // in-flight review state instead of carrying them over
           key={selected.id}
           driver={selected}
+          presence={presenceOf(selected)}
+          liveRide={rideOf(selected)}
           onClose={() => setSelected(null)}
           onDecide={handleDecide}
         />
