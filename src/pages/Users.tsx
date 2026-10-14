@@ -7,6 +7,7 @@ import {
 import { db } from '../firebase';
 import { formatPKR } from '../utils/rideTaxonomy';
 import { useAdminLabel } from '../utils/adminAuthContext';
+import { RiderSpending } from '../components/LedgerStatements';
 import {
   getPlatform, getVerification, platformLabel,
   type Platform, type Verification,
@@ -15,7 +16,7 @@ import {
   User, Smartphone, Shield, ShieldCheck, ShieldAlert, ShieldX, X, Navigation,
   CheckCircle, XCircle, Clock, Activity, DollarSign, Mail, Phone,
   Loader, ChevronRight, MapPin, Hash, CreditCard, Calendar, LogIn,
-  Search, Monitor, RotateCcw, UserCheck, Info
+  Search, Monitor, RotateCcw, UserCheck, Info, PauseCircle, PlayCircle
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -45,7 +46,18 @@ interface UserProfile {
   /** Legacy fields kept so older documents still render correctly. */
   os?: string;
   isVerified?: boolean;
+  /** Suspended accounts see only an "account suspended" screen in the app. */
+  suspended?: boolean;
+  /** "self" when the user suspended it from the app, else the admin. */
+  suspendedBy?: string;
+  suspendedAt?: FireTime;
 }
+
+const SuspendedBadge: React.FC = () => (
+  <span className="user-os-badge" style={{ background: 'rgba(220, 38, 38, 0.1)', color: 'var(--accent-red)' }}>
+    <PauseCircle size={10} /> Suspended
+  </span>
+);
 
 interface LoginRecord {
   id: string;
@@ -229,7 +241,8 @@ const UserHistoryDrawer: React.FC<{
   user: UserProfile;
   onClose: () => void;
   onSetStatus: (id: string, status: Verification) => Promise<void>;
-}> = ({ user, onClose, onSetStatus }) => {
+  onSetSuspended: (id: string, suspended: boolean) => Promise<void>;
+}> = ({ user, onClose, onSetStatus, onSetSuspended }) => {
   const [rides, setRides] = useState<RideRecord[]>([]);
   const [logins, setLogins] = useState<LoginRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -286,10 +299,6 @@ const UserHistoryDrawer: React.FC<{
     fetchLogins();
   }, [user.id]);
 
-  const totalSpending = rides
-    .filter(r => isCompleted(r.status))
-    .reduce((sum, r) => sum + toNum(r.price), 0);
-
   const completedCount = rides.filter(r => isCompleted(r.status)).length;
   const cancelledCount = rides.filter(r => isCancelled(r.status)).length;
 
@@ -299,6 +308,18 @@ const UserHistoryDrawer: React.FC<{
     setWorking(status);
     await onSetStatus(user.id, status);
     setWorking(null);
+  };
+
+  const [suspending, setSuspending] = useState(false);
+  const toggleSuspended = async () => {
+    const next = !user.suspended;
+    const ok = window.confirm(next
+      ? `Suspend ${user.name || 'this account'}? They will only see an "account suspended" screen in the app and can't book or drive.`
+      : `Reactivate ${user.name || 'this account'}? They can use the app again straight away.`);
+    if (!ok) return;
+    setSuspending(true);
+    await onSetSuspended(user.id, next);
+    setSuspending(false);
   };
 
   return (
@@ -316,6 +337,7 @@ const UserHistoryDrawer: React.FC<{
               <div className="user-card-meta" style={{ marginTop: '0.35rem' }}>
                 <PlatformBadge platform={platform} />
                 <VerifyBadge state={verification} small />
+                {user.suspended && <SuspendedBadge />}
               </div>
             </div>
           </div>
@@ -435,9 +457,15 @@ const UserHistoryDrawer: React.FC<{
             )}
           </div>
 
-          {/* ── Spending summary ── */}
+          {/* ── Spending, across in-city, city-to-city and seat bookings ── */}
           <div className="modal-section">
-            <h3 className="modal-section-title"><DollarSign size={16} /> Spending Summary</h3>
+            <h3 className="modal-section-title"><DollarSign size={16} /> Rider spending</h3>
+            <RiderSpending uid={uid} name={user.name || ''} phone={user.phone || ''} />
+          </div>
+
+          {/* ── In-city ride counts ── */}
+          <div className="modal-section">
+            <h3 className="modal-section-title"><Navigation size={16} /> In-city rides</h3>
             {loading ? (
               <div className="loading-row"><Loader size={14} className="spin" /> Calculating…</div>
             ) : (
@@ -456,11 +484,6 @@ const UserHistoryDrawer: React.FC<{
                   <XCircle size={18} />
                   <div className="usb-val">{cancelledCount}</div>
                   <div className="usb-label">Cancelled</div>
-                </div>
-                <div className="user-stat-box total-spend" style={{ '--stat-color': 'var(--accent-purple)' } as React.CSSProperties}>
-                  <DollarSign size={18} />
-                  <div className="usb-val">{formatPKR(totalSpending)}</div>
-                  <div className="usb-label">Total Spent</div>
                 </div>
               </div>
             )}
@@ -520,6 +543,31 @@ const UserHistoryDrawer: React.FC<{
             )}
           </div>
 
+          {/* ── Suspension ── */}
+          <div className="modal-section">
+            <h3 className="modal-section-title"><PauseCircle size={16} /> Account status</h3>
+            {user.suspended ? (
+              <p className="verify-hint" style={{ color: 'var(--accent-red)' }}>
+                <Info size={12} /> Suspended {user.suspendedBy === 'self' ? 'by the user from the app' : `by ${user.suspendedBy || 'an admin'}`}
+                {user.suspendedAt ? ` on ${fmtTime(user.suspendedAt)}` : ''}. The app shows them only the suspended screen.
+              </p>
+            ) : (
+              <p className="verify-hint"><Info size={12} /> Active.</p>
+            )}
+            <button
+              className={user.suspended ? 'dv-verify-btn' : 'dv-reject-btn'}
+              onClick={() => { void toggleSuspended(); }}
+              disabled={suspending}
+              style={{ marginTop: '0.5rem' }}
+            >
+              {suspending
+                ? <><Loader size={16} className="spin" /> Saving…</>
+                : user.suspended
+                  ? <><PlayCircle size={16} /> Reactivate account</>
+                  : <><PauseCircle size={16} /> Suspend account</>}
+            </button>
+          </div>
+
           {/* ── Verification actions ── */}
           <div className="verify-action-bar">
             {verification === 'verified' ? (
@@ -557,10 +605,11 @@ const UserHistoryDrawer: React.FC<{
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type Filter = 'all' | 'android' | 'ios' | 'verified' | 'pending' | 'unverified';
+type Filter = 'all' | 'android' | 'ios' | 'verified' | 'pending' | 'unverified' | 'suspended';
 
 const FILTER_LABEL: Record<Filter, string> = {
   all: 'All', android: 'Android', ios: 'iOS', verified: 'Verified', pending: 'Pending', unverified: 'Unverified',
+  suspended: 'Suspended',
 };
 
 export const Users: React.FC = () => {
@@ -611,6 +660,22 @@ export const Users: React.FC = () => {
     }
   };
 
+  const handleSetSuspended = async (userId: string, suspended: boolean) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), suspended
+        ? { suspended: true, suspendedBy: adminLabel, suspendedAt: serverTimestamp() }
+        : { suspended: false });
+      const patch: Partial<UserProfile> = suspended
+        ? { suspended: true, suspendedBy: adminLabel, suspendedAt: Date.now() }
+        : { suspended: false };
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, ...patch } : u));
+      setSelectedUser(prev => prev?.id === userId ? { ...prev, ...patch } : prev);
+    } catch (e) {
+      console.error(e);
+      alert('Could not update the account.');
+    }
+  };
+
   const counts = {
     all: users.length,
     android: users.filter(u => getPlatform(u) === 'android').length,
@@ -618,6 +683,7 @@ export const Users: React.FC = () => {
     verified: users.filter(u => getVerification(u) === 'verified').length,
     pending: users.filter(u => getVerification(u) === 'pending').length,
     unverified: users.filter(u => getVerification(u) !== 'verified').length,
+    suspended: users.filter(u => u.suspended === true).length,
   };
 
   const filtered = users.filter(u => {
@@ -634,6 +700,7 @@ export const Users: React.FC = () => {
       filter === 'ios' ? getPlatform(u) === 'ios' :
       filter === 'verified' ? getVerification(u) === 'verified' :
       filter === 'pending' ? getVerification(u) === 'pending' :
+      filter === 'suspended' ? u.suspended === true :
       getVerification(u) !== 'verified';
     return matchSearch && matchFilter;
   });
@@ -696,6 +763,7 @@ export const Users: React.FC = () => {
                   <div className="user-card-meta">
                     <PlatformBadge platform={platform} />
                     <VerifyBadge state={verification} small />
+                    {user.suspended && <SuspendedBadge />}
                     {user.loginCount != null && (
                       <span className="user-os-badge"><LogIn size={10} /> {user.loginCount}</span>
                     )}
@@ -718,6 +786,7 @@ export const Users: React.FC = () => {
           user={selectedUser}
           onClose={() => setSelectedUser(null)}
           onSetStatus={handleSetStatus}
+          onSetSuspended={handleSetSuspended}
         />
       )}
     </div>

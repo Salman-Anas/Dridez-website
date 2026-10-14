@@ -28,7 +28,7 @@ import {
   DollarSign, TrendingUp, Loader, ChevronRight, Search, Armchair, Gauge,
   CreditCard, Calendar, FileText, Activity, MapPin, IdCard, UserCheck,
   Info, ArrowUpDown, Undo2, MessageSquareWarning, Radio, AlertTriangle, Snowflake,
-  Wifi, KeyRound, Route,
+  Wifi, KeyRound, Route, PauseCircle,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -52,6 +52,9 @@ interface UserAccount {
   verificationStatus?: string;
   driver?: boolean;
   driverApplicationStatus?: string;
+  suspended?: boolean;
+  suspendedBy?: string;
+  suspendedAt?: FireTime;
 }
 
 interface RideRecord {
@@ -438,6 +441,14 @@ const DriverDrawer: React.FC<{
             </div>
             <AppStatusBadge status={status} />
             <LiveBadge presence={presence} liveRide={liveRide} />
+            {account?.suspended && (
+              <span
+                className="da-pill da-pill-suspended"
+                title={`Suspended ${account.suspendedBy === 'self' ? 'by the driver from the app' : `by ${account.suspendedBy || 'an admin'}`}${account.suspendedAt ? ` · ${fmtTime(account.suspendedAt)}` : ''}`}
+              >
+                <PauseCircle size={10} /> Suspended
+              </span>
+            )}
           </div>
           <button className="modal-close-btn" onClick={onClose}><X size={20} /></button>
         </div>

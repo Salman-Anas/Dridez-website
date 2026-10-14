@@ -16,18 +16,28 @@ import {
 } from '../utils/firebaseValues';
 import {
   summariseEntries, entryMs, entryMagnitude, normaliseLedgerType, ledgerSource,
-  ledgerRideId, computeMissed, balanceState, addTotals,
+  ledgerRideId, computeMissed, balanceState, addTotals, topupEntryNote,
   LEDGER_SOURCE_LABEL, BALANCE_STATE_LABEL, LOW_BALANCE_THRESHOLD,
   EMPTY_TOTALS,
   type LedgerEntry, type WalletTotals, type MissedCommission, type BalanceState,
 } from '../utils/walletSchema';
-import { topupStatus, type TopupRequest } from '../utils/topupSchema';
+import {
+  topupStatus, readTopupTrust, REVIEW_REASON_LABEL, TOPUP_STATUS_LABEL,
+  type TopupRequest, type TopupStatus, type TopupTrust,
+} from '../utils/topupSchema';
+import {
+  fetchAllDriverLedgers, driverTotals, money, type RawDoc,
+} from '../utils/ledgerSchema';
+import { downloadWorkbook, exportFileName, type Cell } from '../utils/excelExport';
 import { PaymentAccountPanel } from '../components/PaymentAccountPanel';
 import { TopupQueue, type TopupDriverInfo } from '../components/TopupQueue';
+import { TopupTrustPanel } from '../components/TopupTrustPanel';
+import { DriverStatement } from '../components/LedgerStatements';
 import {
   Wallet, Search, X, Loader, RefreshCw, AlertCircle, AlertTriangle,
   Calendar, Filter, ChevronRight, TrendingUp, TrendingDown, Car, Phone,
   ArrowUpDown, XCircle, Coins, PiggyBank, Undo2, Hash, User, Percent,
+  Download, FileSpreadsheet, PauseCircle, ShieldAlert,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -64,6 +74,10 @@ interface Account {
   openingCredit: number;
   currency: string;
   walletUpdatedAt: unknown;
+  /** Top-up trust settings on the wallet (defaults when there is none). */
+  authentic: boolean;
+  safeLimit: number;
+  minTopup: number;
   entries: LedgerEntry[];
   missed: MissedCommission[];
 }
@@ -78,7 +92,7 @@ interface AccountRow {
   state: BalanceState;
 }
 
-type BalanceFilter = 'all' | 'negative' | 'low' | 'ok' | 'no_wallet';
+type BalanceFilter = 'all' | 'negative' | 'low' | 'ok' | 'no_wallet' | 'unauthentic';
 
 type SortKey =
   | 'commission_desc' | 'commission_asc'
@@ -100,6 +114,7 @@ const BALANCE_FILTER_LABEL: Record<BalanceFilter, string> = {
   low: `Low (under ${LOW_BALANCE_THRESHOLD})`,
   ok: 'Healthy',
   no_wallet: 'No wallet yet',
+  unauthentic: 'Unauthentic',
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -145,11 +160,16 @@ interface DrawerProps {
   periodLabel: string;
   ridesById: Map<string, RideLite>;
   onClose: () => void;
+  /** The wallet's live trust settings, so the list behind stays current. */
+  onTrust: (uid: string, trust: TopupTrust) => void;
 }
 
-interface ContactInfo { name?: string; phone?: string; email?: string }
+interface ContactInfo {
+  name?: string; phone?: string; email?: string;
+  suspended?: boolean; suspendedBy?: string; suspendedAt?: unknown;
+}
 
-const AccountDrawer: React.FC<DrawerProps> = ({ row, periodLabel, ridesById, onClose }) => {
+const AccountDrawer: React.FC<DrawerProps> = ({ row, periodLabel, ridesById, onClose, onTrust }) => {
   const { account, totals, entries, missed, missedTotal } = row;
   const [contact, setContact] = useState<ContactInfo | null>(null);
 
@@ -168,8 +188,9 @@ const AccountDrawer: React.FC<DrawerProps> = ({ row, periodLabel, ridesById, onC
   const refunds = entries
     .filter(e => normaliseLedgerType(e.type) === 'ctc_commission_refund')
     .sort((a, b) => entryMs(b) - entryMs(a));
+  // Reversals sit with the top-ups they undo, so the two reconcile.
   const topups = entries
-    .filter(e => normaliseLedgerType(e.type) === 'topup')
+    .filter(e => ['topup', 'topup_reversal'].includes(normaliseLedgerType(e.type)))
     .sort((a, b) => entryMs(b) - entryMs(a));
 
   const sortedMissed = [...missed].sort((a, b) => b.at - a.at);
@@ -181,6 +202,8 @@ const AccountDrawer: React.FC<DrawerProps> = ({ row, periodLabel, ridesById, onC
           <div className="modal-title-row">
             <strong className="da-drawer-name">{account.name}</strong>
             <BalancePill state={row.state} hasWallet={account.hasWallet} />
+            {account.hasWallet && !account.authentic && <span className="da-pill da-pill-unauthentic">Unauthentic</span>}
+            {contact?.suspended && <span className="da-pill da-pill-suspended"><PauseCircle size={10} /> Suspended</span>}
             {account.appStatus && (
               <span className="cell-dim">{STATUS_LABEL[account.appStatus]}</span>
             )}
@@ -189,6 +212,16 @@ const AccountDrawer: React.FC<DrawerProps> = ({ row, periodLabel, ridesById, onC
         </div>
 
         <div className="modal-body">
+          {contact?.suspended && (
+            <div className="rate-status rate-status-error" style={{ marginBottom: '1rem' }}>
+              <PauseCircle size={13} />
+              <span>
+                Account suspended {contact.suspendedBy === 'self' ? 'by the driver from the app' : `by ${contact.suspendedBy || 'an admin'}`}
+                {contact.suspendedAt ? ` on ${formatDateTime(contact.suspendedAt)}` : ''}. Reactivate it from the Users page.
+              </span>
+            </div>
+          )}
+
           {/* Who */}
           <div className="modal-section">
             <h3 className="modal-section-title"><User size={16} /> Driver</h3>
@@ -208,9 +241,8 @@ const AccountDrawer: React.FC<DrawerProps> = ({ row, periodLabel, ridesById, onC
             <h3 className="modal-section-title"><Wallet size={16} /> Wallet</h3>
             {!account.hasWallet ? (
               <p className="modal-no-data">
-                No wallet document exists for this driver. The app creates one, with its opening
-                credit, the first time they open the driver side — so this driver has not started
-                driving yet.
+                No wallet document exists for this driver. The app creates one the first time they
+                open the driver side — so this driver has not started driving yet.
               </p>
             ) : (
               <>
@@ -244,6 +276,7 @@ const AccountDrawer: React.FC<DrawerProps> = ({ row, periodLabel, ridesById, onC
                     </span>
                   </div>
                 )}
+                <TopupTrustPanel uid={account.uid} onTrust={t => onTrust(account.uid, t)} />
               </>
             )}
           </div>
@@ -256,7 +289,7 @@ const AccountDrawer: React.FC<DrawerProps> = ({ row, periodLabel, ridesById, onC
               <div className="detail-item"><span className="di-label">Refunded</span><span className="di-value">{formatPKR(totals.refunded)}</span></div>
               <div className="detail-item"><span className="di-label">Net to platform</span><span className="di-value text-green">{formatPKR(totals.net)}</span></div>
               <div className="detail-item"><span className="di-label">Rides charged</span><span className="di-value">{totals.chargeCount}</span></div>
-              <div className="detail-item"><span className="di-label">Topped up</span><span className="di-value">{formatPKR(totals.toppedUp)}</span></div>
+              <div className="detail-item"><span className="di-label">Balance added (less reversals)</span><span className="di-value">{formatPKR(totals.toppedUp)}</span></div>
               <div className="detail-item">
                 <span className="di-label">Missed on cancellations</span>
                 <span className="di-value text-orange">{formatPKR(missedTotal)}</span>
@@ -422,29 +455,56 @@ const AccountDrawer: React.FC<DrawerProps> = ({ row, periodLabel, ridesById, onC
           {topups.length > 0 && (
             <div className="modal-section">
               <h3 className="modal-section-title">
-                <PiggyBank size={16} /> Top-ups
+                <PiggyBank size={16} /> Top-ups &amp; reversals
                 <span className="rides-count-badge">{topups.length}</span>
               </h3>
               <div className="da-mini-table-wrap">
                 <table className="da-mini-table">
                   <thead>
-                    <tr><th>When</th><th>Method</th><th>Reference</th><th>By</th><th className="num">Amount</th></tr>
+                    <tr><th>When</th><th>Kind</th><th>How</th><th>Reference</th><th className="num">Amount</th><th className="num">Balance after</th></tr>
                   </thead>
                   <tbody>
-                    {topups.map(e => (
-                      <tr key={e.id}>
-                        <td className="cell-dim">{formatDateTime(e.at)}</td>
-                        <td className="cell-dim">{e.method || '—'}</td>
-                        <td className="cell-dim">{e.reference || '—'}</td>
-                        <td className="cell-dim">{e.by || '—'}</td>
-                        <td className="num cell-fare">{formatPKR(entryMagnitude(e))}</td>
-                      </tr>
-                    ))}
+                    {topups.map(e => {
+                      const reversal = normaliseLedgerType(e.type) === 'topup_reversal';
+                      return (
+                        <tr key={e.id}>
+                          <td className="cell-dim">{formatDateTime(e.at)}</td>
+                          <td><span className="da-src">{reversal ? 'Reversed' : 'Top-up'}</span></td>
+                          <td className="cell-dim">
+                            {topupEntryNote(e)}
+                            {reversal && e.reason && <div className="tq-reason">“{e.reason}”</div>}
+                          </td>
+                          <td className="mono cell-dim">{e.reference || '—'}</td>
+                          <td className={`num ${reversal ? 'ls-neg' : 'cell-fare'}`}>
+                            {reversal ? '−' : '+'}{formatPKR(entryMagnitude(e))}
+                          </td>
+                          <td className="num cell-dim">{e.balanceAfter !== undefined && e.balanceAfter !== null ? formatPKR(toNum(e.balanceAfter)) : '—'}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={4}>Balance added, less reversals</td>
+                      <td className="num cell-fare">{formatPKR(totals.toppedUp)}</td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </div>
           )}
+
+          {/* Statement, with its own period, as the driver sees it in the app */}
+          <div className="modal-section">
+            <h3 className="modal-section-title"><FileSpreadsheet size={16} /> Driver statement</h3>
+            <DriverStatement
+              uid={account.uid}
+              name={account.name}
+              phone={account.phone || contact?.phone || ''}
+              balance={account.hasWallet ? account.balance : null}
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -547,7 +607,9 @@ export const DriverAccounts: React.FC = () => {
       }
 
       // Wallets
-      const wallets = new Map<string, { balance: number; openingCredit: number; currency: string; updatedAt: unknown }>();
+      const wallets = new Map<string, {
+        balance: number; openingCredit: number; currency: string; updatedAt: unknown; trust: TopupTrust;
+      }>();
       walletSnap.forEach(d => {
         const w = d.data() as Record<string, unknown>;
         wallets.set(d.id, {
@@ -555,6 +617,7 @@ export const DriverAccounts: React.FC = () => {
           openingCredit: toNum(w.openingCredit),
           currency: typeof w.currency === 'string' ? w.currency : 'PKR',
           updatedAt: w.updatedAt ?? w.createdAt,
+          trust: readTopupTrust(w),
         });
       });
 
@@ -631,6 +694,7 @@ export const DriverAccounts: React.FC = () => {
       const built: Account[] = [...uids].map(uid => {
         const app = apps.get(uid);
         const wallet = wallets.get(uid);
+        const trust = wallet?.trust ?? readTopupTrust(undefined);
         return {
           uid,
           name: app?.fullName?.trim() || `Driver ${uid.slice(0, 8)}…`,
@@ -643,6 +707,9 @@ export const DriverAccounts: React.FC = () => {
           openingCredit: wallet?.openingCredit ?? 0,
           currency: wallet?.currency ?? 'PKR',
           walletUpdatedAt: wallet?.updatedAt,
+          authentic: trust.authentic,
+          safeLimit: trust.safeLimit,
+          minTopup: trust.minTopup,
           entries: entriesByDriver.get(uid) ?? [],
           missed: missedByDriver.get(uid) ?? [],
         };
@@ -705,10 +772,11 @@ export const DriverAccounts: React.FC = () => {
   );
 
   const balanceCounts = useMemo(() => {
-    const c: Record<BalanceFilter, number> = { all: rows.length, negative: 0, low: 0, ok: 0, no_wallet: 0 };
+    const c: Record<BalanceFilter, number> = { all: rows.length, negative: 0, low: 0, ok: 0, no_wallet: 0, unauthentic: 0 };
     for (const r of rows) {
       if (!r.account.hasWallet) { c.no_wallet += 1; continue; }
       c[r.state] += 1;
+      if (!r.account.authentic) c.unauthentic += 1;
     }
     return c;
   }, [rows]);
@@ -717,7 +785,8 @@ export const DriverAccounts: React.FC = () => {
     const q = search.trim().toLowerCase();
     const filtered = rows.filter(r => {
       if (balanceFilter === 'no_wallet' && r.account.hasWallet) return false;
-      if (balanceFilter !== 'all' && balanceFilter !== 'no_wallet') {
+      if (balanceFilter === 'unauthentic' && (!r.account.hasWallet || r.account.authentic)) return false;
+      if (balanceFilter !== 'all' && balanceFilter !== 'no_wallet' && balanceFilter !== 'unauthentic') {
         if (!r.account.hasWallet || r.state !== balanceFilter) return false;
       }
       if (!q) return true;
@@ -752,12 +821,172 @@ export const DriverAccounts: React.FC = () => {
 
   const topupDrivers = useMemo(() => new Map<string, TopupDriverInfo>(accounts.map(a => [a.uid, {
     name: a.name, phone: a.phone, balance: a.balance, hasWallet: a.hasWallet,
+    authentic: a.authentic, safeLimit: a.safeLimit,
   }])), [accounts]);
 
   const pendingTopupDrivers = useMemo(
-    () => new Set(topups.filter(t => topupStatus(t) === 'pending' && t.driver).map(t => t.driver as string)),
+    () => new Set(topups.filter(t => (topupStatus(t) === 'pending' || topupStatus(t) === 'auto_credited') && t.driver).map(t => t.driver as string)),
     [topups],
   );
+
+  const handleTrust = useCallback((uid: string, t: TopupTrust) => {
+    setAccounts(prev => prev.map(a => (
+      a.uid === uid && (a.authentic !== t.authentic || a.safeLimit !== t.safeLimit || a.minTopup !== t.minTopup)
+        ? { ...a, authentic: t.authentic, safeLimit: t.safeLimit, minTopup: t.minTopup }
+        : a
+    )));
+  }, []);
+
+  // ── Portal-wide exports, for the selected period ───────────────────────────
+
+  const [exporting, setExporting] = useState<'topups' | 'commission' | null>(null);
+  const [exportError, setExportError] = useState('');
+
+  const exportTopups = async () => {
+    setExporting('topups');
+    setExportError('');
+    try {
+      const names = new Map(accounts.map(a => [a.uid, a]));
+      const date = (v: unknown): Date | null => (toMs(v) ? new Date(toMs(v)) : null);
+      const list = topups
+        .filter(t => inPeriod(toMs(t.createdAt), range))
+        .sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt));
+      const rows = list.map((t): Cell[] => {
+        const a = t.driver ? names.get(t.driver) : undefined;
+        const status = topupStatus(t);
+        return [
+          date(t.createdAt),
+          a?.name ?? '',
+          a?.phone ?? '',
+          t.driver ?? '',
+          money(t.amount),
+          t.creditedAmount !== undefined && t.creditedAmount !== null ? money(t.creditedAmount) : null,
+          status === 'unknown' ? `Unknown (${String(t.status ?? '')})` : TOPUP_STATUS_LABEL[status],
+          t.reviewReason ? (REVIEW_REASON_LABEL[t.reviewReason] ?? t.reviewReason) : '',
+          date(t.creditedAt),
+          toNum(t.safeLimitBefore) || null,
+          toNum(t.safeLimitAfter) || null,
+          t.reviewedBy ?? '',
+          date(t.reviewedAt),
+          t.rejectionReason || t.reversalReason || '',
+          t.id,
+        ];
+      });
+      const order: TopupStatus[] = ['pending', 'auto_credited', 'approved', 'rejected', 'reversed', 'unknown'];
+      const byStatus = new Map(order.map(k => [k, { count: 0, amount: 0, credited: 0 }]));
+      for (const t of list) {
+        const m = byStatus.get(topupStatus(t))!;
+        m.count += 1;
+        m.amount += toNum(t.amount);
+        m.credited += toNum(t.creditedAmount);
+      }
+      await downloadWorkbook(exportFileName('topups', periodLabel), [
+        {
+          name: 'Summary',
+          columns: ['Status', 'Requests', 'Amount claimed (PKR)', 'Credited (PKR)'],
+          widths: [26, 22, 20, 16],
+          rows: [
+            ...order.filter(k => byStatus.get(k)!.count > 0).map((k): Cell[] => {
+              const m = byStatus.get(k)!;
+              return [TOPUP_STATUS_LABEL[k], m.count, money(m.amount), money(m.credited)];
+            }),
+            ['Total', list.length, money(list.reduce((sum, t) => sum + toNum(t.amount), 0)), money(list.reduce((sum, t) => sum + toNum(t.creditedAmount), 0))],
+            [null, null, null, null],
+            ['Period', periodLabel, null, null],
+            ['Generated', new Date(), null, null],
+          ],
+        },
+        {
+          name: 'Top-ups',
+          columns: [
+            'Requested', 'Driver', 'Phone', 'Driver UID', 'Amount (PKR)', 'Credited (PKR)', 'Status',
+            'Review reason', 'Credited instantly at', 'Safe limit before (PKR)', 'Safe limit after (PKR)',
+            'Reviewed by', 'Reviewed at', 'Rejection / reversal reason', 'Request ID',
+          ],
+          widths: [20, 22, 14, 30, 13, 14, 22, 30, 20, 18, 18, 22, 20, 36, 24],
+          rows,
+        },
+      ]);
+    } catch (e) {
+      console.error(e);
+      setExportError(e instanceof Error ? e.message : 'The top-ups export failed.');
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const exportCommission = async () => {
+    setExporting('commission');
+    setExportError('');
+    try {
+      const entriesByDriver = new Map<string, RawDoc[]>(accounts.map(a => [
+        a.uid,
+        a.entries.map(({ id, uid: _uid, ...data }) => ({ id, data: data as Record<string, unknown> })),
+      ]));
+      const ledgers = await fetchAllDriverLedgers(entriesByDriver);
+      const byUid = new Map(accounts.map(a => [a.uid, a]));
+      const uids = new Set([...accounts.map(a => a.uid), ...ledgers.keys()]);
+      const sum = { trips: 0, earnings: 0, commission: 0, net: 0, added: 0, held: 0, owed: 0 };
+      const rows: Cell[][] = [];
+      for (const uid of uids) {
+        const ledger = ledgers.get(uid) ?? { wallet: [], trips: [] };
+        const t = driverTotals(ledger, range);
+        const a = byUid.get(uid);
+        if (!a && !t.trips && !t.commission && !t.added) continue;
+        sum.trips += t.trips;
+        sum.earnings += t.earnings;
+        sum.commission += t.commission;
+        sum.net += t.net;
+        sum.added += t.added;
+        // Same split as the "Balance held" and "Drivers in deficit" tiles.
+        if (a?.hasWallet && a.balance > 0) sum.held += a.balance;
+        if (a?.hasWallet && a.balance < 0) sum.owed -= a.balance;
+        rows.push([
+          a?.name ?? `Driver ${uid.slice(0, 8)}…`,
+          a?.phone ?? '',
+          uid,
+          t.trips, t.earnings, t.commission, t.net, t.added,
+          a?.hasWallet ? a.balance : null,
+          a?.hasWallet ? (a.authentic ? 'Yes' : 'No') : '',
+          a?.hasWallet ? a.safeLimit : null,
+        ]);
+      }
+      rows.sort((x, y) => (y[5] as number) - (x[5] as number));
+      await downloadWorkbook(exportFileName('commission', periodLabel), [
+        {
+          name: 'Summary',
+          columns: ['Item', 'Value'],
+          widths: [34, 22],
+          rows: [
+            ['Period', periodLabel],
+            ['Generated', new Date()],
+            ['Drivers', rows.length],
+            ['Completed trips', sum.trips],
+            ['Total earnings (PKR)', money(sum.earnings)],
+            ['Commission paid (PKR)', money(sum.commission)],
+            ['Net earnings (PKR)', money(sum.net)],
+            ['Balance added (PKR)', money(sum.added)],
+            ['Balance held now (PKR)', money(sum.held)],
+            ['Owed by drivers in deficit now (PKR)', money(sum.owed)],
+          ],
+        },
+        {
+          name: 'Drivers',
+          columns: [
+            'Driver', 'Phone', 'Driver UID', 'Trips', 'Earnings (PKR)', 'Commission (PKR)', 'Net (PKR)',
+            'Balance added (PKR)', 'Current balance (PKR)', 'Authentic', 'Safe limit (PKR)',
+          ],
+          widths: [24, 14, 30, 8, 16, 16, 14, 18, 20, 10, 16],
+          rows,
+        },
+      ]);
+    } catch (e) {
+      console.error(e);
+      setExportError(e instanceof Error ? e.message : 'The commission report failed.');
+    } finally {
+      setExporting(null);
+    }
+  };
 
   return (
     <div className="rides-page">
@@ -804,6 +1033,19 @@ export const DriverAccounts: React.FC = () => {
             <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} style={{ padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }} />
           </div>
         )}
+      </div>
+
+      {/* Exports for the period above */}
+      <div className="dv-control-row" style={{ marginBottom: '1.25rem', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <button className="pay-view-all-btn" onClick={() => { void exportTopups(); }} disabled={exporting !== null || topupsLoading || loading}>
+          {exporting === 'topups' ? <Loader size={15} className="spin" /> : <Download size={15} />}
+          <span>All top-ups · {periodLabel}</span>
+        </button>
+        <button className="pay-view-all-btn" onClick={() => { void exportCommission(); }} disabled={exporting !== null || loading}>
+          {exporting === 'commission' ? <Loader size={15} className="spin" /> : <FileSpreadsheet size={15} />}
+          <span>Commission report · {periodLabel}</span>
+        </button>
+        {exportError && <span className="rate-error"><AlertCircle size={13} /> {exportError}</span>}
       </div>
 
       {/* What the period adds up to */}
@@ -933,6 +1175,7 @@ export const DriverAccounts: React.FC = () => {
                 <th>Driver</th>
                 <th>Vehicle</th>
                 <th className="num">Balance</th>
+                <th className="num">Safe limit</th>
                 <th className="num">Rides</th>
                 <th className="num">Commission</th>
                 <th className="num">Refunded</th>
@@ -947,8 +1190,11 @@ export const DriverAccounts: React.FC = () => {
                   <td>
                     <div className="da-driver-name">
                       {r.account.name}
+                      {r.account.hasWallet && !r.account.authentic && (
+                        <span className="da-pill da-pill-unauthentic" title="Every top-up is checked by hand"><ShieldAlert size={10} /> Unauthentic</span>
+                      )}
                       {pendingTopupDrivers.has(r.account.uid) && (
-                        <span className="tq-status tq-status-pending" style={{ marginLeft: '0.4rem' }}>Top-up pending</span>
+                        <span className="tq-status tq-status-pending" style={{ marginLeft: '0.4rem' }} title="A top-up is waiting to be approved or checked">Top-up to review</span>
                       )}
                     </div>
                     <div className="cell-dim">{r.account.phone || r.account.uid.slice(0, 12) + '…'}</div>
@@ -962,6 +1208,14 @@ export const DriverAccounts: React.FC = () => {
                       {r.account.hasWallet ? formatPKR(r.account.balance) : '—'}
                     </div>
                     <BalancePill state={r.state} hasWallet={r.account.hasWallet} />
+                  </td>
+                  <td className="num">
+                    {r.account.hasWallet ? (
+                      <>
+                        <div className="cell-dim">{formatPKR(r.account.safeLimit)}</div>
+                        <div className="da-limit">min {formatPKR(r.account.minTopup)}</div>
+                      </>
+                    ) : <span className="cell-dim">—</span>}
                   </td>
                   <td className="num cell-dim">{r.totals.chargeCount || '—'}</td>
                   <td className="num cell-dim">{r.totals.earned ? formatPKR(r.totals.earned) : '—'}</td>
@@ -1003,6 +1257,7 @@ export const DriverAccounts: React.FC = () => {
           periodLabel={periodLabel}
           ridesById={ridesById}
           onClose={() => setSelected(null)}
+          onTrust={handleTrust}
         />
       )}
     </div>

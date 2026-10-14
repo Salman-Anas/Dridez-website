@@ -4562,6 +4562,50 @@ body {
 .da-pill-low      { background: rgba(217, 119, 6, 0.1);   color: var(--accent-orange);  border: 1px solid rgba(217, 119, 6, 0.22); }
 .da-pill-negative { background: rgba(220, 38, 38, 0.1);   color: var(--accent-red);     border: 1px solid rgba(220, 38, 38, 0.22); }
 .da-pill-none     { background: rgba(100, 116, 139, 0.1); color: var(--text-secondary); border: 1px solid var(--border-color); }
+.da-pill-unauthentic { background: rgba(220, 38, 38, 0.1); color: var(--accent-red); border: 1px solid rgba(220, 38, 38, 0.22); margin-left: 0.4rem; }
+.da-pill-suspended   { background: rgba(220, 38, 38, 0.1); color: var(--accent-red); border: 1px solid rgba(220, 38, 38, 0.22); }
+.da-limit { font-size: 0.72rem; color: var(--text-secondary); white-space: nowrap; }
+
+/* ─── Ledger statements (driver drawer, user drawer) ─── */
+
+.ls-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.ls-toolbar .pay-period-tabs { flex-wrap: wrap; }
+.ls-dates { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.ls-dates input {
+  padding: 0.35rem 0.4rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+}
+.ls-export { margin-left: auto; }
+.ls-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.9rem;
+}
+.ls-total {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  background: var(--surface-color);
+}
+.ls-total span { display: block; font-size: 0.7rem; color: var(--text-secondary); }
+.ls-total strong { font-size: 1rem; color: var(--text-primary); }
+.ls-total strong.ls-neg { color: var(--accent-red); }
+.ls-total strong.ls-pos { color: var(--accent-green); }
+.ls-subtitle { font-size: 0.82rem; font-weight: 700; color: var(--text-primary); margin: 0.9rem 0 0.4rem; }
+.ls-scroll { max-height: 320px; overflow-y: auto; }
+.da-mini-table td.ls-neg { color: var(--accent-red); }
+.da-mini-table td.ls-pos { color: var(--accent-green); }
 
 /* Missed commission is never revenue, so it never gets the money colour. */
 .da-missed {
@@ -4811,6 +4855,9 @@ body {
 
 .tq-row-approved { border-left-color: var(--accent-green); }
 .tq-row-rejected { border-left-color: var(--accent-red); }
+.tq-row-auto_credited { border-left-color: #2563eb; }
+.tq-row-reversed { border-left-color: var(--accent-red); }
+.tq-row-unknown { border-left-color: #64748b; }
 
 .tq-receipt {
   width: 84px;
@@ -4851,6 +4898,20 @@ body {
 
 .tq-meta span { display: inline-flex; align-items: center; gap: 0.25rem; }
 .tq-reason { color: var(--text-primary); font-style: italic; }
+.tq-meta .tq-instant { color: #2563eb; font-weight: 600; }
+.tq-negative { color: var(--accent-red); }
+
+.tq-effects {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.tq-effects strong { color: var(--text-primary); }
+.tq-effects strong.tq-negative { color: var(--accent-red); }
 
 .tq-status {
   display: inline-block;
@@ -4864,6 +4925,9 @@ body {
 .tq-status-pending  { background: rgba(217, 119, 6, 0.1);  color: var(--accent-orange); border: 1px solid rgba(217, 119, 6, 0.25); }
 .tq-status-approved { background: rgba(5, 150, 105, 0.1);  color: var(--accent-green);  border: 1px solid rgba(5, 150, 105, 0.25); }
 .tq-status-rejected { background: rgba(220, 38, 38, 0.1);  color: var(--accent-red);    border: 1px solid rgba(220, 38, 38, 0.25); }
+.tq-status-auto_credited { background: rgba(37, 99, 235, 0.1); color: #2563eb; border: 1px solid rgba(37, 99, 235, 0.25); }
+.tq-status-reversed { background: rgba(220, 38, 38, 0.1);  color: var(--accent-red);    border: 1px solid rgba(220, 38, 38, 0.25); }
+.tq-status-unknown  { background: rgba(100, 116, 139, 0.1); color: #64748b; border: 1px solid rgba(100, 116, 139, 0.25); }
 
 .tq-side { display: flex; flex-direction: column; align-items: flex-end; gap: 0.15rem; }
 .tq-amount { font-size: 1.35rem; font-weight: 800; color: var(--text-primary); letter-spacing: -0.02em; white-space: nowrap; }
