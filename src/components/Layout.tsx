@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Outlet, Navigate, useLocation } from 'react-router-dom';
-import { Loader, ShieldAlert } from 'lucide-react';
+import { Loader, Menu, ShieldAlert } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { useAdminAuth } from '../utils/adminAuthContext';
 import { logoutAdmin } from '../utils/auth';
@@ -8,6 +8,15 @@ import { logoutAdmin } from '../utils/auth';
 export const Layout: React.FC = () => {
   const location = useLocation();
   const { status, user } = useAdminAuth();
+  // On a phone the sidebar is a drawer behind the top bar's menu button.
+  const [navOpen, setNavOpen] = useState(false);
+
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setNavOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navOpen]);
 
   // Firebase restores a persisted session asynchronously. Redirecting during
   // that window would bounce a signed-in admin to the login screen on every
@@ -51,10 +60,24 @@ export const Layout: React.FC = () => {
 
   return (
     <div className="app-layout">
-      <Sidebar />
-      <div className="main-content">
+      <header className="portal-topbar">
+        <button
+          className="portal-menu-btn"
+          onClick={() => setNavOpen(true)}
+          aria-label="Open menu"
+          aria-controls="portal-nav"
+          aria-expanded={navOpen}
+        >
+          <Menu size={18} />
+        </button>
+        <img src="/dridez-icon.png" alt="" width={28} height={28} />
+        <strong>Dridez Admin</strong>
+      </header>
+      {navOpen && <div className="sidebar-backdrop" onClick={() => setNavOpen(false)} />}
+      <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
+      <main className="main-content">
         <Outlet />
-      </div>
+      </main>
     </div>
   );
 };

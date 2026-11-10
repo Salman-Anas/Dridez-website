@@ -8,6 +8,8 @@ import { db } from '../firebase';
 import { formatPKR } from '../utils/rideTaxonomy';
 import { useAdminLabel } from '../utils/adminAuthContext';
 import { RiderSpending } from '../components/LedgerStatements';
+import { NotifyComposer } from '../components/NotifyComposer';
+import { isDeletedAccount, type Recipient } from '../utils/broadcastSchema';
 import {
   getPlatform, getVerification, platformLabel,
   type Platform, type Verification,
@@ -16,7 +18,7 @@ import {
   User, Smartphone, Shield, ShieldCheck, ShieldAlert, ShieldX, X, Navigation,
   CheckCircle, XCircle, Clock, Activity, DollarSign, Mail, Phone,
   Loader, ChevronRight, MapPin, Hash, CreditCard, Calendar, LogIn,
-  Search, Monitor, RotateCcw, UserCheck, Info, PauseCircle, PlayCircle
+  Search, Monitor, RotateCcw, UserCheck, Info, PauseCircle, PlayCircle, Bell, Trash2
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -51,11 +53,13 @@ interface UserProfile {
   /** "self" when the user suspended it from the app, else the admin. */
   suspendedBy?: string;
   suspendedAt?: FireTime;
+  /** A deleted account keeps a stub document: shown as Deleted, never reactivated. */
+  deleted?: boolean;
 }
 
-const SuspendedBadge: React.FC = () => (
+const SuspendedBadge: React.FC<{ deleted?: boolean }> = ({ deleted }) => (
   <span className="user-os-badge" style={{ background: 'rgba(220, 38, 38, 0.1)', color: 'var(--accent-red)' }}>
-    <PauseCircle size={10} /> Suspended
+    {deleted ? <><Trash2 size={10} /> Deleted</> : <><PauseCircle size={10} /> Suspended</>}
   </span>
 );
 
@@ -242,7 +246,8 @@ const UserHistoryDrawer: React.FC<{
   onClose: () => void;
   onSetStatus: (id: string, status: Verification) => Promise<void>;
   onSetSuspended: (id: string, suspended: boolean) => Promise<void>;
-}> = ({ user, onClose, onSetStatus, onSetSuspended }) => {
+  onNotify: (uid: string) => void;
+}> = ({ user, onClose, onSetStatus, onSetSuspended, onNotify }) => {
   const [rides, setRides] = useState<RideRecord[]>([]);
   const [logins, setLogins] = useState<LoginRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -337,7 +342,7 @@ const UserHistoryDrawer: React.FC<{
               <div className="user-card-meta" style={{ marginTop: '0.35rem' }}>
                 <PlatformBadge platform={platform} />
                 <VerifyBadge state={verification} small />
-                {user.suspended && <SuspendedBadge />}
+                {(user.suspended || isDeletedAccount(user)) && <SuspendedBadge deleted={isDeletedAccount(user)} />}
               </div>
             </div>
           </div>
@@ -546,7 +551,12 @@ const UserHistoryDrawer: React.FC<{
           {/* ── Suspension ── */}
           <div className="modal-section">
             <h3 className="modal-section-title"><PauseCircle size={16} /> Account status</h3>
-            {user.suspended ? (
+            {isDeletedAccount(user) ? (
+              <p className="verify-hint" style={{ color: 'var(--accent-red)' }}>
+                <Info size={12} /> The user deleted this account from the app
+                {user.suspendedAt ? ` on ${fmtTime(user.suspendedAt)}` : ''}. It can't be reactivated or notified.
+              </p>
+            ) : user.suspended ? (
               <p className="verify-hint" style={{ color: 'var(--accent-red)' }}>
                 <Info size={12} /> Suspended {user.suspendedBy === 'self' ? 'by the user from the app' : `by ${user.suspendedBy || 'an admin'}`}
                 {user.suspendedAt ? ` on ${fmtTime(user.suspendedAt)}` : ''}. The app shows them only the suspended screen.
@@ -554,18 +564,24 @@ const UserHistoryDrawer: React.FC<{
             ) : (
               <p className="verify-hint"><Info size={12} /> Active.</p>
             )}
-            <button
-              className={user.suspended ? 'dv-verify-btn' : 'dv-reject-btn'}
-              onClick={() => { void toggleSuspended(); }}
-              disabled={suspending}
-              style={{ marginTop: '0.5rem' }}
-            >
-              {suspending
-                ? <><Loader size={16} className="spin" /> Saving…</>
-                : user.suspended
-                  ? <><PlayCircle size={16} /> Reactivate account</>
-                  : <><PauseCircle size={16} /> Suspend account</>}
-            </button>
+            {!isDeletedAccount(user) && (
+              <div className="drawer-actions">
+                <button
+                  className={user.suspended ? 'dv-verify-btn' : 'dv-reject-btn'}
+                  onClick={() => { void toggleSuspended(); }}
+                  disabled={suspending}
+                >
+                  {suspending
+                    ? <><Loader size={16} className="spin" /> Saving…</>
+                    : user.suspended
+                      ? <><PlayCircle size={16} /> Reactivate account</>
+                      : <><PauseCircle size={16} /> Suspend account</>}
+                </button>
+                <button className="dv-revoke-btn" onClick={() => onNotify(uid)}>
+                  <Bell size={16} /> Notify this user
+                </button>
+              </div>
+            )}
           </div>
 
           {/* ── Verification actions ── */}
@@ -607,6 +623,16 @@ const UserHistoryDrawer: React.FC<{
 
 type Filter = 'all' | 'android' | 'ios' | 'verified' | 'pending' | 'unverified' | 'suspended';
 
+/** Who the composer can reach from this page: every account that wasn't deleted. */
+const toRecipients = (users: UserProfile[]): Recipient[] => users
+  .filter(u => !isDeletedAccount(u))
+  .map(u => ({
+    uid: u.uid || u.id,
+    name: u.name || '',
+    phone: u.phone || '',
+    verified: getVerification(u) === 'verified',
+  }));
+
 const FILTER_LABEL: Record<Filter, string> = {
   all: 'All', android: 'Android', ios: 'iOS', verified: 'Verified', pending: 'Pending', unverified: 'Unverified',
   suspended: 'Suspended',
@@ -619,6 +645,8 @@ export const Users: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [search, setSearch] = useState('');
+  // null: closed; [] : opened from the header; [uid]: opened from a user's drawer.
+  const [notifyFor, setNotifyFor] = useState<string[] | null>(null);
   // Dashboard stat cards deep-link here as /users?filter=android etc.
   const [searchParams, setSearchParams] = useSearchParams();
   const paramFilter = searchParams.get('filter') as Filter | null;
@@ -683,7 +711,7 @@ export const Users: React.FC = () => {
     verified: users.filter(u => getVerification(u) === 'verified').length,
     pending: users.filter(u => getVerification(u) === 'pending').length,
     unverified: users.filter(u => getVerification(u) !== 'verified').length,
-    suspended: users.filter(u => u.suspended === true).length,
+    suspended: users.filter(u => u.suspended === true && !isDeletedAccount(u)).length,
   };
 
   const filtered = users.filter(u => {
@@ -700,16 +728,21 @@ export const Users: React.FC = () => {
       filter === 'ios' ? getPlatform(u) === 'ios' :
       filter === 'verified' ? getVerification(u) === 'verified' :
       filter === 'pending' ? getVerification(u) === 'pending' :
-      filter === 'suspended' ? u.suspended === true :
+      filter === 'suspended' ? u.suspended === true && !isDeletedAccount(u) :
       getVerification(u) !== 'verified';
     return matchSearch && matchFilter;
   });
 
   return (
     <div>
-      <div className="dashboard-header" style={{ textAlign: 'left', marginBottom: '1.5rem' }}>
-        <h1>Users</h1>
-        <p>Click any user to review their full profile, ID documents, login history &amp; spending — then verify them</p>
+      <div className="page-head">
+        <div>
+          <h1>Users</h1>
+          <p>Review profiles, ID details, logins and spending, then verify or notify people.</p>
+        </div>
+        <button className="page-head-btn" onClick={() => setNotifyFor([])} disabled={loading}>
+          <Bell size={15} /> Notify users
+        </button>
       </div>
 
       {/* Filter pills */}
@@ -763,7 +796,7 @@ export const Users: React.FC = () => {
                   <div className="user-card-meta">
                     <PlatformBadge platform={platform} />
                     <VerifyBadge state={verification} small />
-                    {user.suspended && <SuspendedBadge />}
+                    {(user.suspended || isDeletedAccount(user)) && <SuspendedBadge deleted={isDeletedAccount(user)} />}
                     {user.loginCount != null && (
                       <span className="user-os-badge"><LogIn size={10} /> {user.loginCount}</span>
                     )}
@@ -787,6 +820,18 @@ export const Users: React.FC = () => {
           onClose={() => setSelectedUser(null)}
           onSetStatus={handleSetStatus}
           onSetSuspended={handleSetSuspended}
+          onNotify={uid => setNotifyFor([uid])}
+        />
+      )}
+
+      {notifyFor && (
+        <NotifyComposer
+          scope="users"
+          recipients={toRecipients(users)}
+          preselected={notifyFor}
+          noun={{ one: 'user', many: 'users' }}
+          segmentLabels={{ verified: 'Verified', unverified: 'Not verified' }}
+          onClose={() => setNotifyFor(null)}
         />
       )}
     </div>

@@ -28,7 +28,7 @@ export const PrivacyPolicy: React.FC = () => {
   const sections: PolicySection[] = useMemo(() => [
     {
       id: 'mandatory-location',
-      title: 'Mandatory GPS & Background Location Disclosure',
+      title: 'Location: When and Why We Use It',
       category: 'location',
       audience: 'critical',
       icon: <Navigation size={24} />,
@@ -39,12 +39,12 @@ export const PrivacyPolicy: React.FC = () => {
           </p>
           <div className="info-box info-box-warning">
             <h4 style={{ margin: '0 0 0.5rem 0', color: '#92400e', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <AlertTriangle size={20} /> Driver Background Location Tracking
+              <AlertTriangle size={20} /> Driver Location While Online
             </h4>
             <p style={{ margin: 0 }}>
-              When a Driver toggles their status to <strong>&ldquo;Online / On-Duty&rdquo;</strong> within the Dridez Driver app, we collect background GPS location coordinates even when the app is running in the background, minimized, or when the screen is locked. 
+              Drivers are set to <strong>&ldquo;Online&rdquo;</strong> automatically when they open the driver side of the Dridez app, and can switch to <strong>&ldquo;Offline&rdquo;</strong> at any time. While a Driver is online and the app is open on screen, it shares their location about every 30 seconds so nearby ride requests can be matched to them. During an accepted trip, the Driver&rsquo;s location is also shared with that trip&rsquo;s Rider so they can follow the car.
               <br /><br />
-              <strong>Why is background location required?</strong> This enables our automated matching engine to continuously route nearby ride requests to active drivers, calculate dynamic fares, generate accurate trip routing graphs, and monitor live journey safety. Background location collection terminates immediately when the Driver toggles their status to <strong>&ldquo;Offline / Off-Duty&rdquo;</strong> or completely exits the application session.
+              <strong>Dridez does not collect location in the background.</strong> When the app is minimised, the screen is locked or the app is closed, no new location is collected. The last location shared is kept for up to 30 minutes so the Driver can still receive nearby requests as notifications, after which they are treated as offline. Switching to Offline or signing out removes it straight away.
             </p>
           </div>
           <h4>Rider Foreground Location Tracking</h4>
@@ -264,7 +264,7 @@ export const PrivacyPolicy: React.FC = () => {
       content: (
         <>
           <p>
-            We welcome your scrutiny and inquiries regarding our data handling protocols. If you harbor questions, require clarification on background location tracking, wish to challenge an algorithmic matching decision, or desire to formalize an external privacy concern, please contact our dedicated legal and compliance division:
+            We welcome your scrutiny and inquiries regarding our data handling protocols. If you harbor questions, require clarification on how we use location, wish to challenge an algorithmic matching decision, or desire to formalize an external privacy concern, please contact our dedicated legal and compliance division:
           </p>
           <div className="info-box" style={{ background: '#f8fafc', border: '1px solid #cbd5e1' }}>
             <p style={{ margin: '0 0 0.5rem 0' }}><strong>Dridez Technologies Ltd. — Data Privacy Office</strong></p>
@@ -350,7 +350,7 @@ export const PrivacyPolicy: React.FC = () => {
 
           <div className="privacy-meta">
             <div className="privacy-meta-item">
-              <span>Effective Date:</span> <strong>August 5, 2026</strong>
+              <span>Effective Date:</span> <strong>November 5, 2026</strong>
             </div>
             <div className="privacy-meta-item">
               <span>Applies To:</span> <strong>Dridez Driver &amp; Rider Apps</strong>
@@ -369,7 +369,7 @@ export const PrivacyPolicy: React.FC = () => {
             </div>
             <div>
               <div className="highlight-title">Transparent Location</div>
-              <p className="highlight-desc">Background GPS is harvested solely when Drivers go Online to match nearby ride dispatches.</p>
+              <p className="highlight-desc">Location is only used while the app is open: to book rides, match online Drivers to nearby requests, and follow a trip. Never in the background.</p>
             </div>
           </div>
 

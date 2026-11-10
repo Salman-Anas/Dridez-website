@@ -2,12 +2,29 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Car, Settings, CreditCard, Navigation,
-  LogOut, CheckSquare, LifeBuoy, Wallet,
+  LogOut, CheckSquare, LifeBuoy, Wallet, X,
 } from 'lucide-react';
 import { logoutAdmin } from '../utils/auth';
 import { useAdminAuth } from '../utils/adminAuthContext';
 
-export const Sidebar: React.FC = () => {
+const LINKS = [
+  { to: '/', label: 'Dashboard', Icon: LayoutDashboard, end: true },
+  { to: '/rides', label: 'Rides', Icon: Navigation },
+  { to: '/drivers', label: 'Drivers', Icon: Car },
+  { to: '/users', label: 'Users', Icon: Users },
+  { to: '/payments', label: 'Payments', Icon: CreditCard },
+  { to: '/driver-accounts', label: 'Driver Accounts', Icon: Wallet },
+  { to: '/tickets', label: 'Support Tickets', Icon: LifeBuoy },
+  { to: '/tasks', label: 'Tasks', Icon: CheckSquare },
+];
+
+interface Props {
+  /** On a phone the sidebar is a drawer; this says whether it's showing. */
+  open: boolean;
+  onClose: () => void;
+}
+
+export const Sidebar: React.FC<Props> = ({ open, onClose }) => {
   const navigate = useNavigate();
   const { adminEmail } = useAdminAuth();
 
@@ -16,86 +33,33 @@ export const Sidebar: React.FC = () => {
     navigate('/login', { replace: true });
   };
 
+  const linkClass = ({ isActive }: { isActive: boolean }) => `nav-item ${isActive ? 'active' : ''}`;
+
   return (
-    <div className="sidebar">
-      <div className="sidebar-logo">
-        Admin Portal
+    <aside className={`sidebar ${open ? 'open' : ''}`} id="portal-nav" aria-label="Portal navigation">
+      <div className="sidebar-brand">
+        <img src="/dridez-icon.png" alt="" width={32} height={32} />
+        <div>
+          <strong>Dridez</strong>
+          <span>Admin portal</span>
+        </div>
+        <button className="sidebar-close" onClick={onClose} aria-label="Close menu">
+          <X size={16} />
+        </button>
       </div>
 
-      <nav>
-        <NavLink
-          to="/"
-          end
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-        >
-          <LayoutDashboard size={20} />
-          Dashboard
-        </NavLink>
+      <nav onClick={e => { if ((e.target as HTMLElement).closest('a')) onClose(); }}>
+        {LINKS.map(({ to, label, Icon, end }) => (
+          <NavLink key={to} to={to} end={end} className={linkClass}>
+            <Icon size={16} />
+            {label}
+          </NavLink>
+        ))}
 
-        <NavLink
-          to="/rides"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-        >
-          <Navigation size={20} />
-          Rides
-        </NavLink>
+        <div className="sidebar-spacer" />
 
-        <NavLink
-          to="/drivers"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-        >
-          <Car size={20} />
-          Drivers
-        </NavLink>
-
-        <NavLink
-          to="/users"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-        >
-          <Users size={20} />
-          Users
-        </NavLink>
-
-        <NavLink
-          to="/payments"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-        >
-          <CreditCard size={20} />
-          Payments
-        </NavLink>
-
-        <NavLink
-          to="/driver-accounts"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-        >
-          <Wallet size={20} />
-          Driver Accounts
-        </NavLink>
-
-        <NavLink
-          to="/tickets"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-        >
-          <LifeBuoy size={20} />
-          Support Tickets
-        </NavLink>
-
-        <NavLink
-          to="/tasks"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-        >
-          <CheckSquare size={20} />
-          Tasks
-        </NavLink>
-
-        <div style={{ flex: 1 }} />
-
-        <NavLink
-          to="/settings"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          style={{ marginTop: 'auto' }}
-        >
-          <Settings size={20} />
+        <NavLink to="/settings" className={linkClass}>
+          <Settings size={16} />
           Settings
         </NavLink>
 
@@ -108,14 +72,13 @@ export const Sidebar: React.FC = () => {
 
         <button
           onClick={() => { void handleLogout(); }}
-          className="nav-item"
-          style={{ width: '100%', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}
+          className="nav-item nav-logout"
           title="Sign out of Firebase on this device"
         >
-          <LogOut size={20} style={{ color: '#dc2626' }} />
-          <span style={{ color: '#dc2626' }}>Log Out</span>
+          <LogOut size={16} />
+          Log out
         </button>
       </nav>
-    </div>
+    </aside>
   );
 };

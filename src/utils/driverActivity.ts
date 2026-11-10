@@ -1,12 +1,15 @@
 // ─── Live driver activity ────────────────────────────────────────────────────
 // Who is online and who is on a ride right now, read live:
 //   • online  — RTDB `drivers_online/{uid}`, published every 30 s while the
-//               driver is online. The app keeps counting a driver for 30
-//               minutes after their last update (so they still get nearby
-//               requests after closing the app), and so does this.
+//               driver is online. Since app 3.8.0 drivers go online by
+//               themselves when they open the driver side (they can still
+//               switch off). The app keeps counting a driver for 30 minutes
+//               after their last update (so they still get nearby requests
+//               after closing the app), and so does this.
 //   • on ride — RTDB `rides/{rideId}` with a driver and status `inprogress`
-//               (heading to pickup) or `started` (rider on board), plus
-//               city-to-city `citytocity` docs with status `ontrip`.
+//               (heading to pickup), `arrived` (waiting at the pickup) or
+//               `started` (rider on board), plus city-to-city `citytocity`
+//               docs with status `ontrip`.
 // See dridez/schema.md §3.8 and §4.
 
 import { useEffect, useMemo, useState } from 'react';
@@ -39,11 +42,12 @@ export interface LiveRide {
 }
 
 /** In-city statuses where the driver is committed to a rider. */
-const IN_CITY_ACTIVE = new Set(['inprogress', 'in_progress', 'started']);
+const IN_CITY_ACTIVE = new Set(['inprogress', 'in_progress', 'arrived', 'started']);
 
 export const LIVE_RIDE_STATUS_LABEL: Record<string, string> = {
   inprogress: 'Heading to pickup',
   in_progress: 'Heading to pickup',
+  arrived: 'Waiting at pickup',
   started: 'Rider on board',
   ontrip: 'City-to-city trip under way',
 };
@@ -110,7 +114,9 @@ export const useDriverActivity = (): DriverActivity => {
           pickup: r.pickup,
           dropoff: r.dropoff,
           price: r.price,
-          since: toMs(r.startedAt) || toMs(r.acceptedAt) || toMs(r.createdAt),
+          since: (status === 'started' && toMs(r.startedAt))
+            || (status === 'arrived' && toMs(r.arrivedAt))
+            || toMs(r.acceptedAt) || toMs(r.createdAt),
         });
       });
       setInCity(next);

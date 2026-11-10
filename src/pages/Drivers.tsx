@@ -22,13 +22,15 @@ import {
   cabtypeLabel, isBookableCabtype, formatPKR,
 } from '../utils/rideTaxonomy';
 import { useAdminLabel } from '../utils/adminAuthContext';
+import { NotifyComposer } from '../components/NotifyComposer';
+import type { Recipient } from '../utils/broadcastSchema';
 import {
   CheckCircle, X, Car, Truck, Bike, Bus, Phone, Hash, Shield, ShieldCheck, ShieldX,
   Image as ImageIcon, Images, Star, Navigation, Clock, XCircle, Mail,
   DollarSign, TrendingUp, Loader, ChevronRight, Search, Armchair, Gauge,
   CreditCard, Calendar, FileText, Activity, MapPin, IdCard, UserCheck,
   Info, ArrowUpDown, Undo2, MessageSquareWarning, Radio, AlertTriangle, Snowflake,
-  Wifi, KeyRound, Route, PauseCircle,
+  Wifi, KeyRound, Route, PauseCircle, Bell,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -315,7 +317,8 @@ const DriverDrawer: React.FC<{
   liveRide?: LiveRide;
   onClose: () => void;
   onDecide: (driver: Driver, decision: Decision) => Promise<void>;
-}> = ({ driver, presence, liveRide, onClose, onDecide }) => {
+  onNotify: (uid: string) => void;
+}> = ({ driver, presence, liveRide, onClose, onDecide, onNotify }) => {
   const [rides, setRides] = useState<RideRecord[]>([]);
   const [ratings, setRatings] = useState<RatingRecord[]>([]);
   const [account, setAccount] = useState<UserAccount | null>(null);
@@ -851,6 +854,9 @@ const DriverDrawer: React.FC<{
                       : <><Undo2 size={16} /> Move Back to Pending</>}
                   </button>
                 )}
+                <button className="dv-revoke-btn" onClick={() => onNotify(uid)} disabled={working !== null}>
+                  <Bell size={16} /> Notify this driver
+                </button>
               </div>
               {status !== 'approved' && (
                 <p className="verify-hint" style={{ justifyContent: 'center' }}>
@@ -932,6 +938,23 @@ type ActivityFilter = 'any' | 'online' | 'on_ride';
 type TypeFilter = string;
 type SortKey = 'newest' | 'oldest' | 'name' | 'type';
 
+/**
+ * Who the composer can reach from this page: one entry per account. A driver
+ * counts as verified once their application is approved; an account with
+ * several (legacy) applications counts as approved if any one is.
+ */
+const toDriverRecipients = (drivers: Driver[]): Recipient[] => {
+  const byUid = new Map<string, Recipient>();
+  for (const d of drivers) {
+    const uid = getUid(d, d.id);
+    const verified = getStatus(d) === 'approved';
+    const seen = byUid.get(uid);
+    if (seen && (seen.verified || !verified)) continue;
+    byUid.set(uid, { uid, name: d.fullName || '', phone: d.phoneNumber || '', verified });
+  }
+  return [...byUid.values()];
+};
+
 const SORT_LABEL: Record<SortKey, string> = {
   newest: 'Newest first',
   oldest: 'Oldest first',
@@ -950,6 +973,8 @@ export const Drivers: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>('any');
   const [sort, setSort] = useState<SortKey>('newest');
+  // null: closed; [] : opened from the header; [uid]: opened from a driver's drawer.
+  const [notifyFor, setNotifyFor] = useState<string[] | null>(null);
   const activity = useDriverActivity();
 
   useEffect(() => {
@@ -1079,9 +1104,14 @@ export const Drivers: React.FC = () => {
 
   return (
     <div>
-      <div className="dashboard-header" style={{ textAlign: 'left', marginBottom: '1.5rem' }}>
-        <h1>Driver Applications</h1>
-        <p>Review each vehicle and its documents against the account holder's ID, then approve or reject</p>
+      <div className="page-head">
+        <div>
+          <h1>Driver Applications</h1>
+          <p>Check each vehicle and its documents against the applicant's ID, then approve, reject or notify.</p>
+        </div>
+        <button className="page-head-btn" onClick={() => setNotifyFor([])} disabled={loading}>
+          <Bell size={15} /> Notify drivers
+        </button>
       </div>
 
       {/* Status filter pills */}
@@ -1221,6 +1251,18 @@ export const Drivers: React.FC = () => {
           liveRide={rideOf(selected)}
           onClose={() => setSelected(null)}
           onDecide={handleDecide}
+          onNotify={uid => setNotifyFor([uid])}
+        />
+      )}
+
+      {notifyFor && (
+        <NotifyComposer
+          scope="drivers"
+          recipients={toDriverRecipients(drivers)}
+          preselected={notifyFor}
+          noun={{ one: 'driver', many: 'drivers' }}
+          segmentLabels={{ verified: 'Verified (approved)', unverified: 'Not approved yet' }}
+          onClose={() => setNotifyFor(null)}
         />
       )}
     </div>
