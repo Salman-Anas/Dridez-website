@@ -111,7 +111,7 @@ const VEHICLE_TEXT: [keyof DriverDetails, string][] = [
 const problemWith = (f: DriverDetails, had: DriverDetails, vehicleType: string): string | null => {
   if (!f.firstName) return 'Enter a first name.';
   if (!f.lastName) return 'Enter a last name.';
-  if (!PHONE_RULE.test(f.phone)) return 'The phone number must start with 03 and be 11 digits.';
+  if (f.phone !== had.phone && !PHONE_RULE.test(f.phone)) return 'The phone number must start with 03 and be 11 digits.';
   if ((f.cnic || had.cnic) && !CNIC_RULE.test(f.cnic)) return 'The CNIC must be 13 digits.';
 
   // Older applications may lack some of these; only refuse emptying a filled one.

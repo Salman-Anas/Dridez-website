@@ -64,7 +64,9 @@ const tidy = (f: UserDetails): UserDetails => ({
 const problemWith = (f: UserDetails, had: UserDetails): string | null => {
   if (!f.firstName) return 'Enter a first name.';
   if (!f.lastName) return 'Enter a last name.';
-  if (!PHONE_RULE.test(f.phone)) return 'The phone number must start with 03 and be 11 digits.';
+  // Only a new number has to be in the app's format; a few older accounts keep
+  // an international one, and that mustn't block fixing anything else.
+  if (f.phone !== bareDigits(had.phone) && !PHONE_RULE.test(f.phone)) return 'The phone number must start with 03 and be 11 digits.';
   // Older accounts may never have given a CNIC or address; don't force one on them.
   if ((f.cnic || had.cnic) && !CNIC_RULE.test(f.cnic)) return 'The CNIC must be 13 digits.';
   if ((f.address || had.address) && f.address.length < MIN_ADDRESS_LENGTH) {
