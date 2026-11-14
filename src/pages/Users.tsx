@@ -9,6 +9,7 @@ import { formatPKR } from '../utils/rideTaxonomy';
 import { useAdminLabel } from '../utils/adminAuthContext';
 import { RiderSpending } from '../components/LedgerStatements';
 import { NotifyComposer, type ContactKind } from '../components/NotifyComposer';
+import { UserDetailsEditor } from '../components/UserDetailsEditor';
 import { isDeletedAccount, type Recipient } from '../utils/broadcastSchema';
 import {
   getPlatform, getVerification, platformLabel,
@@ -18,7 +19,7 @@ import {
   User, Smartphone, Shield, ShieldCheck, ShieldAlert, ShieldX, X, Navigation,
   CheckCircle, XCircle, Clock, Activity, DollarSign, Mail, Phone,
   Loader, ChevronRight, MapPin, Hash, CreditCard, Calendar, LogIn,
-  Search, Monitor, RotateCcw, UserCheck, Info, PauseCircle, PlayCircle, Bell, Trash2, MessagesSquare
+  Search, Monitor, RotateCcw, UserCheck, Info, PauseCircle, PlayCircle, Bell, Trash2, MessagesSquare, UserPen
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -29,6 +30,10 @@ interface UserProfile {
   id: string;
   uid?: string;
   name?: string;
+  firstName?: string;
+  lastName?: string;
+  /** Name as on the ID card. */
+  verifiedName?: string;
   phone?: string;
   email?: string;
   emailVerified?: boolean;
@@ -247,7 +252,8 @@ const UserHistoryDrawer: React.FC<{
   onSetStatus: (id: string, status: Verification) => Promise<void>;
   onSetSuspended: (id: string, suspended: boolean) => Promise<void>;
   onNotify: (uid: string) => void;
-}> = ({ user, onClose, onSetStatus, onSetSuspended, onNotify }) => {
+  onEdit: () => void;
+}> = ({ user, onClose, onSetStatus, onSetSuspended, onNotify, onEdit }) => {
   const [rides, setRides] = useState<RideRecord[]>([]);
   const [logins, setLogins] = useState<LoginRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -354,6 +360,7 @@ const UserHistoryDrawer: React.FC<{
           <div className="modal-section">
             <h3 className="modal-section-title"><CreditCard size={16} /> Verification Details</h3>
             <div className="modal-details-grid">
+              <Detail icon={<User size={11} />} label="Name on ID" value={user.verifiedName || user.name} full />
               <Detail icon={<CreditCard size={11} />} label="CNIC" value={fmtCnic(user.cnic)} mono />
               <Detail icon={<Phone size={11} />} label="Phone" value={user.phone} />
               <Detail icon={<MapPin size={11} />} label="Address" value={user.address} full />
@@ -402,6 +409,13 @@ const UserHistoryDrawer: React.FC<{
               />
               <Detail icon={<Hash size={11} />} label="UID" value={uid} mono full />
             </div>
+            {!isDeletedAccount(user) && (
+              <div className="drawer-actions">
+                <button className="dv-revoke-btn" onClick={onEdit}>
+                  <UserPen size={16} /> Edit details
+                </button>
+              </div>
+            )}
           </div>
 
           {/* ── Device & sessions ── */}
@@ -650,6 +664,7 @@ export const Users: React.FC = () => {
   const [search, setSearch] = useState('');
   // null: closed; [] : opened from the header; [uid]: opened from a user's drawer.
   const [notifyFor, setNotifyFor] = useState<{ uids: string[]; kind: ContactKind } | null>(null);
+  const [editing, setEditing] = useState<UserProfile | null>(null);
   // Dashboard stat cards deep-link here as /users?filter=android etc.
   const [searchParams, setSearchParams] = useSearchParams();
   const paramFilter = searchParams.get('filter') as Filter | null;
@@ -829,6 +844,19 @@ export const Users: React.FC = () => {
           onSetStatus={handleSetStatus}
           onSetSuspended={handleSetSuspended}
           onNotify={uid => setNotifyFor({ uids: [uid], kind: 'notification' })}
+          onEdit={() => setEditing(selectedUser)}
+        />
+      )}
+
+      {editing && (
+        <UserDetailsEditor
+          uid={editing.uid || editing.id}
+          user={editing}
+          onClose={() => setEditing(null)}
+          onSaved={changes => {
+            setUsers(prev => prev.map(u => u.id === editing.id ? { ...u, ...changes } : u));
+            setSelectedUser(prev => prev?.id === editing.id ? { ...prev, ...changes } : prev);
+          }}
         />
       )}
 

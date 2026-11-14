@@ -6106,3 +6106,35 @@ a.dv-revoke-btn {
     width: auto;
   }
 }
+
+/* ─── Edit user details ──────────────────────────────────────────────────── */
+
+.ue-drawer {
+  width: 480px;
+  margin: 0;
+}
+
+.ue-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ue-gap {
+  margin-top: 14px;
+}
+
+.ue-readonly {
+  padding: 0.65rem 0.9rem;
+  border: 1.5px dashed var(--border-color);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 520px) {
+  .ue-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
