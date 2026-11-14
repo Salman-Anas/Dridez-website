@@ -31,9 +31,12 @@ export interface UserDetailsSource {
   address?: string;
 }
 
-const PHONE_RULE = /^03\d{9}$/;
-const CNIC_RULE = /^\d{13}$/;
+export const PHONE_RULE = /^03\d{9}$/;
+export const CNIC_RULE = /^\d{13}$/;
 const MIN_ADDRESS_LENGTH = 10;
+
+/** Phone numbers and CNICs are typed with spaces and dashes; stored bare. */
+export const bareDigits = (v: string): string => v.replace(/[\s-]/g, '');
 
 /** The form's starting values. Older accounts only have `name`, so it is split. */
 export const detailsOf = (u: UserDetailsSource): UserDetails => {
@@ -53,8 +56,8 @@ const tidy = (f: UserDetails): UserDetails => ({
   firstName: f.firstName.trim(),
   lastName: f.lastName.trim(),
   verifiedName: f.verifiedName.trim(),
-  phone: f.phone.replace(/[\s-]/g, ''),
-  cnic: f.cnic.replace(/[\s-]/g, ''),
+  phone: bareDigits(f.phone),
+  cnic: bareDigits(f.cnic),
   address: f.address.trim(),
 });
 
@@ -71,7 +74,7 @@ const problemWith = (f: UserDetails, had: UserDetails): string | null => {
 };
 
 /** Phone and CNIC are unique per account, as `checkAccountUnique` checks. */
-const takenBy = async (uid: string, field: 'phone' | 'cnic', value: string): Promise<boolean> => {
+export const takenBy = async (uid: string, field: 'phone' | 'cnic', value: string): Promise<boolean> => {
   const snap = await getDocs(query(collection(db, 'users'), where(field, '==', value), limit(2)));
   return snap.docs.some(d => d.id !== uid);
 };

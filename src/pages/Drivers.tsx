@@ -24,6 +24,8 @@ import {
 } from '../utils/rideTaxonomy';
 import { useAdminLabel } from '../utils/adminAuthContext';
 import { NotifyComposer, type ContactKind } from '../components/NotifyComposer';
+import { DriverDetailsEditor } from '../components/DriverDetailsEditor';
+import type { DriverDetailsChanges } from '../utils/driverDetailsSchema';
 import type { Recipient } from '../utils/broadcastSchema';
 import {
   CheckCircle, X, Car, Truck, Bike, Bus, Phone, Hash, Shield, ShieldCheck, ShieldX,
@@ -31,7 +33,7 @@ import {
   DollarSign, TrendingUp, Loader, ChevronRight, Search, Armchair, Gauge,
   CreditCard, Calendar, FileText, Activity, MapPin, IdCard, UserCheck,
   Info, ArrowUpDown, Undo2, MessageSquareWarning, Radio, AlertTriangle, Snowflake,
-  Wifi, KeyRound, Route, PauseCircle, Bell, MessagesSquare,
+  Wifi, KeyRound, Route, PauseCircle, Bell, MessagesSquare, UserPen,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -49,6 +51,8 @@ interface Driver extends DriverApplicationFields {
 interface UserAccount {
   id: string;
   name?: string;
+  firstName?: string;
+  lastName?: string;
   phone?: string;
   email?: string;
   cnic?: string;
@@ -319,7 +323,9 @@ const DriverDrawer: React.FC<{
   onClose: () => void;
   onDecide: (driver: Driver, decision: Decision) => Promise<void>;
   onNotify: (uid: string) => void;
-}> = ({ driver, presence, liveRide, onClose, onDecide, onNotify }) => {
+  /** Opens the editor; `applyToAccount` updates the account this drawer loaded. */
+  onEdit: (account: UserAccount | null, applyToAccount: (changes: DriverDetailsChanges['account']) => void) => void;
+}> = ({ driver, presence, liveRide, onClose, onDecide, onNotify, onEdit }) => {
   const [rides, setRides] = useState<RideRecord[]>([]);
   const [ratings, setRatings] = useState<RatingRecord[]>([]);
   const [account, setAccount] = useState<UserAccount | null>(null);
@@ -858,6 +864,13 @@ const DriverDrawer: React.FC<{
                 <Link className="dv-revoke-btn" to={`/support-chat?uid=${encodeURIComponent(uid)}`}>
                   <MessagesSquare size={16} /> Message in support chat
                 </Link>
+                <button
+                  className="dv-revoke-btn"
+                  disabled={working !== null || loadingAccount}
+                  onClick={() => onEdit(account, changes => setAccount(a => (a ? { ...a, ...changes } : a)))}
+                >
+                  <UserPen size={16} /> Edit details
+                </button>
               </div>
               {status !== 'approved' && (
                 <p className="verify-hint" style={{ justifyContent: 'center' }}>
@@ -973,6 +986,11 @@ export const Drivers: React.FC = () => {
   const [sort, setSort] = useState<SortKey>('newest');
   // null: closed; [] : opened from the header; [uid]: opened from a driver's drawer.
   const [notifyFor, setNotifyFor] = useState<{ uids: string[]; kind: ContactKind } | null>(null);
+  const [editing, setEditing] = useState<{
+    driver: Driver;
+    account: UserAccount | null;
+    applyToAccount: (changes: DriverDetailsChanges['account']) => void;
+  } | null>(null);
   const activity = useDriverActivity();
 
   useEffect(() => {
@@ -1255,6 +1273,23 @@ export const Drivers: React.FC = () => {
           onClose={() => setSelected(null)}
           onDecide={handleDecide}
           onNotify={uid => setNotifyFor({ uids: [uid], kind: 'notification' })}
+          onEdit={(account, applyToAccount) => setEditing({ driver: selected, account, applyToAccount })}
+        />
+      )}
+
+      {editing && (
+        <DriverDetailsEditor
+          uid={getUid(editing.driver, editing.driver.id)}
+          appId={editing.driver.id}
+          app={editing.driver}
+          account={editing.account}
+          onClose={() => setEditing(null)}
+          onSaved={changes => {
+            const id = editing.driver.id;
+            setDrivers(prev => prev.map(d => d.id === id ? { ...d, ...changes.application } : d));
+            setSelected(prev => prev?.id === id ? { ...prev, ...changes.application } : prev);
+            editing.applyToAccount(changes.account);
+          }}
         />
       )}
 

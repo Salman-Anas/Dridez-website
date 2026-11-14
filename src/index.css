@@ -6124,6 +6124,10 @@ a.dv-revoke-btn {
   margin-top: 14px;
 }
 
+.ue-upper {
+  text-transform: uppercase;
+}
+
 .ue-readonly {
   padding: 0.65rem 0.9rem;
   border: 1.5px dashed var(--border-color);
