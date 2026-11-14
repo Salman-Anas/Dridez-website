@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   collection, getDocs, query, where, doc, updateDoc,
   orderBy, limit, serverTimestamp
@@ -8,7 +8,7 @@ import { db } from '../firebase';
 import { formatPKR } from '../utils/rideTaxonomy';
 import { useAdminLabel } from '../utils/adminAuthContext';
 import { RiderSpending } from '../components/LedgerStatements';
-import { NotifyComposer } from '../components/NotifyComposer';
+import { NotifyComposer, type ContactKind } from '../components/NotifyComposer';
 import { isDeletedAccount, type Recipient } from '../utils/broadcastSchema';
 import {
   getPlatform, getVerification, platformLabel,
@@ -18,7 +18,7 @@ import {
   User, Smartphone, Shield, ShieldCheck, ShieldAlert, ShieldX, X, Navigation,
   CheckCircle, XCircle, Clock, Activity, DollarSign, Mail, Phone,
   Loader, ChevronRight, MapPin, Hash, CreditCard, Calendar, LogIn,
-  Search, Monitor, RotateCcw, UserCheck, Info, PauseCircle, PlayCircle, Bell, Trash2
+  Search, Monitor, RotateCcw, UserCheck, Info, PauseCircle, PlayCircle, Bell, Trash2, MessagesSquare
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -580,6 +580,9 @@ const UserHistoryDrawer: React.FC<{
                 <button className="dv-revoke-btn" onClick={() => onNotify(uid)}>
                   <Bell size={16} /> Notify this user
                 </button>
+                <Link className="dv-revoke-btn" to={`/support-chat?uid=${encodeURIComponent(uid)}`}>
+                  <MessagesSquare size={16} /> Message in support chat
+                </Link>
               </div>
             )}
           </div>
@@ -646,7 +649,7 @@ export const Users: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [search, setSearch] = useState('');
   // null: closed; [] : opened from the header; [uid]: opened from a user's drawer.
-  const [notifyFor, setNotifyFor] = useState<string[] | null>(null);
+  const [notifyFor, setNotifyFor] = useState<{ uids: string[]; kind: ContactKind } | null>(null);
   // Dashboard stat cards deep-link here as /users?filter=android etc.
   const [searchParams, setSearchParams] = useSearchParams();
   const paramFilter = searchParams.get('filter') as Filter | null;
@@ -738,11 +741,16 @@ export const Users: React.FC = () => {
       <div className="page-head">
         <div>
           <h1>Users</h1>
-          <p>Review profiles, ID details, logins and spending, then verify or notify people.</p>
+          <p>Review profiles, ID details, logins and spending, then verify, message or notify people.</p>
         </div>
-        <button className="page-head-btn" onClick={() => setNotifyFor([])} disabled={loading}>
-          <Bell size={15} /> Notify users
-        </button>
+        <div className="page-head-actions">
+          <button className="page-head-btn secondary" onClick={() => setNotifyFor({ uids: [], kind: 'message' })} disabled={loading}>
+            <MessagesSquare size={15} /> Message users
+          </button>
+          <button className="page-head-btn" onClick={() => setNotifyFor({ uids: [], kind: 'notification' })} disabled={loading}>
+            <Bell size={15} /> Notify users
+          </button>
+        </div>
       </div>
 
       {/* Filter pills */}
@@ -820,7 +828,7 @@ export const Users: React.FC = () => {
           onClose={() => setSelectedUser(null)}
           onSetStatus={handleSetStatus}
           onSetSuspended={handleSetSuspended}
-          onNotify={uid => setNotifyFor([uid])}
+          onNotify={uid => setNotifyFor({ uids: [uid], kind: 'notification' })}
         />
       )}
 
@@ -828,7 +836,8 @@ export const Users: React.FC = () => {
         <NotifyComposer
           scope="users"
           recipients={toRecipients(users)}
-          preselected={notifyFor}
+          preselected={notifyFor.uids}
+          initialKind={notifyFor.kind}
           noun={{ one: 'user', many: 'users' }}
           segmentLabels={{ verified: 'Verified', unverified: 'Not verified' }}
           onClose={() => setNotifyFor(null)}

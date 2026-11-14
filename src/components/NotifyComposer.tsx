@@ -1,13 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useAdminLabel } from '../utils/adminAuthContext';
+import { Link } from 'react-router-dom';
+import { useAdminAuth, useAdminLabel } from '../utils/adminAuthContext';
+import { sendBulkAdminMessage, MAX_MESSAGE } from '../utils/supportChatSchema';
 import { formatDateTime } from '../utils/firebaseValues';
 import {
   resolveAudience, sendBroadcast, watchBroadcasts, MAX_BODY, MAX_TITLE,
   type Broadcast, type BroadcastScope, type Recipient, type Segment,
 } from '../utils/broadcastSchema';
 import {
-  AlertCircle, Bell, CheckCircle, ImagePlus, Loader, Search, Send, Trash2, X,
+  AlertCircle, Bell, CheckCircle, ImagePlus, Loader, MessagesSquare, Search, Send, Trash2, X,
 } from 'lucide-react';
+
+/** A push notification, or a chat message in each person's Support chat. */
+export type ContactKind = 'notification' | 'message';
 
 interface Props {
   scope: BroadcastScope;
@@ -18,6 +23,8 @@ interface Props {
   /** "users" / "drivers", and what verified means on this page. */
   noun: { one: string; many: string };
   segmentLabels: { verified: string; unverified: string };
+  /** Which way the composer opens; the admin can switch inside it. */
+  initialKind?: ContactKind;
   onClose: () => void;
 }
 
@@ -31,14 +38,22 @@ const STATUS_TEXT: Record<string, string> = {
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
 /**
- * Write a notification and pick who gets it. The portal resolves the choice
- * to uids and queues one `broadcasts` document; the app's Cloud Function
- * sends it, and the list at the bottom follows its progress live.
+ * Pick who to reach (everyone, the verified, the unverified, or people picked
+ * by hand) and send them either:
+ *  - a push notification: one `broadcasts` document that the app's Cloud
+ *    Function sends, followed live in the list at the bottom; or
+ *  - a chat message: written into each person's `supportChats` conversation,
+ *    so it reaches them as a push and their replies land in Support Chat.
  */
 export const NotifyComposer: React.FC<Props> = ({
-  scope, recipients, preselected, noun, segmentLabels, onClose,
+  scope, recipients, preselected, noun, segmentLabels, initialKind = 'notification', onClose,
 }) => {
   const adminLabel = useAdminLabel();
+  const { user } = useAdminAuth();
+  const [kind, setKind] = useState<ContactKind>(initialKind);
+  const [message, setMessage] = useState('');
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [messageResult, setMessageResult] = useState<number | null>(null);
   const [segment, setSegment] = useState<Segment>(preselected?.length ? 'selected' : 'all');
   const [selected, setSelected] = useState<Set<string>>(() => new Set(preselected ?? []));
   const [search, setSearch] = useState('');
@@ -106,10 +121,40 @@ export const NotifyComposer: React.FC<Props> = ({
     setImage(file);
   };
 
-  const canSend = !sending && title.trim() && body.trim() && uids.length > 0;
+  const canSend = !sending && uids.length > 0 && (kind === 'message'
+    ? message.trim().length > 0 && message.length <= MAX_MESSAGE
+    : Boolean(title.trim() && body.trim()));
+
+  const sendMessage = async () => {
+    const who = plural(uids.length, noun.one, noun.many);
+    if (!window.confirm(`Send this chat message to ${who}? Each of them gets it in their Support chat, with a push. It can't be taken back.`)) return;
+    setSending(true);
+    setError('');
+    setMessageResult(null);
+    setProgress({ done: 0, total: uids.length });
+    try {
+      const byUid = new Map(recipients.map(r => [r.uid, r]));
+      const reached = await sendBulkAdminMessage({
+        recipients: uids.map(uid => ({ uid, name: byUid.get(uid)?.name, phone: byUid.get(uid)?.phone })),
+        text: message,
+        adminUid: user?.uid ?? '',
+        adminLabel,
+        onProgress: (done, total) => setProgress({ done, total }),
+      });
+      setMessageResult(reached);
+      setMessage('');
+    } catch (e) {
+      console.error(e);
+      setError(e instanceof Error ? e.message : 'The message could not be sent.');
+    } finally {
+      setSending(false);
+      setProgress(null);
+    }
+  };
 
   const send = async () => {
     if (!canSend) return;
+    if (kind === 'message') { await sendMessage(); return; }
     const who = plural(uids.length, noun.one, noun.many);
     if (!window.confirm(`Send this notification to ${who}? It can't be taken back once it's sent.`)) return;
     setSending(true);
@@ -137,13 +182,35 @@ export const NotifyComposer: React.FC<Props> = ({
       <div className="modal-drawer nt-drawer" role="dialog" aria-modal="true" aria-labelledby="nt-title" onClick={e => e.stopPropagation()}>
         <div className="modal-header nt-header">
           <div className="nt-header-title">
-            <span className="nt-header-icon"><Bell size={15} /></span>
-            <h2 id="nt-title">Notify {noun.many}</h2>
+            <span className="nt-header-icon">{kind === 'message' ? <MessagesSquare size={15} /> : <Bell size={15} />}</span>
+            <h2 id="nt-title">{kind === 'message' ? 'Message' : 'Notify'} {noun.many}</h2>
           </div>
           <button className="modal-close-btn" onClick={onClose} disabled={sending} aria-label="Close"><X size={16} /></button>
         </div>
 
         <div className="modal-body nt-body">
+          {/* How */}
+          <section className="nt-block">
+            <h3 className="nt-label">Send as</h3>
+            <div className="nt-kinds" role="radiogroup" aria-label="Send as">
+              <button type="button" role="radio" aria-checked={kind === 'notification'}
+                className={`nt-kind ${kind === 'notification' ? 'active' : ''}`}
+                onClick={() => { setKind('notification'); setError(''); }} disabled={sending}>
+                <Bell size={14} /> Push notification
+              </button>
+              <button type="button" role="radio" aria-checked={kind === 'message'}
+                className={`nt-kind ${kind === 'message' ? 'active' : ''}`}
+                onClick={() => { setKind('message'); setError(''); }} disabled={sending}>
+                <MessagesSquare size={14} /> Chat message
+              </button>
+            </div>
+            <p className="nt-hint">
+              {kind === 'message'
+                ? 'Lands in each person’s Support chat in the app, with a push. Their replies come back to Support Chat here.'
+                : 'A title and message on their lock screen, with an optional image. It isn’t kept as a conversation.'}
+            </p>
+          </section>
+
           {/* Who */}
           <section className="nt-block">
             <h3 className="nt-label">Send to</h3>
@@ -206,6 +273,23 @@ export const NotifyComposer: React.FC<Props> = ({
           </section>
 
           {/* What */}
+          {kind === 'message' ? (
+            <section className="nt-block">
+              <div className="nt-field-head">
+                <label className="nt-label" htmlFor="nt-message-input">Message</label>
+                <span className={`nt-count ${message.length > MAX_MESSAGE ? 'over' : ''}`}>{message.length}/{MAX_MESSAGE}</span>
+              </div>
+              <textarea
+                id="nt-message-input"
+                className="form-input form-textarea"
+                rows={5}
+                value={message}
+                maxLength={MAX_MESSAGE}
+                onChange={e => { setMessage(e.target.value); setError(''); setMessageResult(null); }}
+                placeholder="Write the message as you would in a chat"
+              />
+            </section>
+          ) : (
           <section className="nt-block">
             <div className="nt-field-head">
               <label className="nt-label" htmlFor="nt-title-input">Title</label>
@@ -258,10 +342,20 @@ export const NotifyComposer: React.FC<Props> = ({
             )}
             <p className="nt-hint">Android phones show the image. iPhones show the title and message.</p>
           </section>
+          )}
 
           {/* Preview */}
           <section className="nt-block">
             <h3 className="nt-label">Preview</h3>
+            {kind === 'message' ? (
+              <div className="nt-phone nt-chat" aria-hidden="true">
+                <div className="nt-chat-head">
+                  <img src="/dridez-icon.png" alt="" />
+                  <span>Dridez Support</span>
+                </div>
+                <div className="nt-bubble">{message.trim() || 'Your message appears here.'}</div>
+              </div>
+            ) : (
             <div className="nt-phone" aria-hidden="true">
               <div className="nt-notice">
                 <div className="nt-notice-head">
@@ -274,9 +368,19 @@ export const NotifyComposer: React.FC<Props> = ({
                 {preview && <img className="nt-notice-image" src={preview} alt="" />}
               </div>
             </div>
+            )}
           </section>
 
           {/* Sent */}
+          {kind === 'message' ? (
+            <section className="nt-block">
+              <h3 className="nt-label">Replies</h3>
+              <p className="nt-hint">
+                Every message is kept in that person’s conversation. Open{' '}
+                <Link to="/support-chat" onClick={onClose}>Support Chat</Link> to see replies.
+              </p>
+            </section>
+          ) : (
           <section className="nt-block">
             <h3 className="nt-label">Recent</h3>
             {recentError && <div className="rate-error"><AlertCircle size={13} /> {recentError}</div>}
@@ -303,11 +407,24 @@ export const NotifyComposer: React.FC<Props> = ({
               </ul>
             )}
           </section>
+          )}
         </div>
 
         <div className="nt-footer">
           {error && <div className="rate-error"><AlertCircle size={13} /> {error}</div>}
-          {justSent && !error && (
+          {kind === 'message' && progress && (
+            <div className="rate-status rate-status-warn">
+              <Loader size={13} className="spin" />
+              <span>Sending… {progress.done.toLocaleString()} of {progress.total.toLocaleString()}</span>
+            </div>
+          )}
+          {kind === 'message' && messageResult !== null && !error && (
+            <div className="rate-status rate-status-ok">
+              <CheckCircle size={13} />
+              <span>Sent to {plural(messageResult, 'person', 'people')}. Replies arrive in Support Chat.</span>
+            </div>
+          )}
+          {kind === 'notification' && justSent && !error && (
             <div className="rate-status rate-status-ok">
               <CheckCircle size={13} />
               <span>

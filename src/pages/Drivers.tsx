@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   collection, getDocs, getDoc, doc, query, where,
   writeBatch, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
-  getStatus, getVehicleType, getVehicle, getSeats, isFreight,
+  getStatus, getVehicleType, getVehicle, getSeats,
   getCompany, getModel, getVariant, getEngineCc, getVehicleTitle,
   getLicenceImg, getLicenceBackImg, getRegistrationImg, getCnicImg, getVehicleImages,
   getDocumentCount, getUid,
@@ -22,7 +23,7 @@ import {
   cabtypeLabel, isBookableCabtype, formatPKR,
 } from '../utils/rideTaxonomy';
 import { useAdminLabel } from '../utils/adminAuthContext';
-import { NotifyComposer } from '../components/NotifyComposer';
+import { NotifyComposer, type ContactKind } from '../components/NotifyComposer';
 import type { Recipient } from '../utils/broadcastSchema';
 import {
   CheckCircle, X, Car, Truck, Bike, Bus, Phone, Hash, Shield, ShieldCheck, ShieldX,
@@ -30,7 +31,7 @@ import {
   DollarSign, TrendingUp, Loader, ChevronRight, Search, Armchair, Gauge,
   CreditCard, Calendar, FileText, Activity, MapPin, IdCard, UserCheck,
   Info, ArrowUpDown, Undo2, MessageSquareWarning, Radio, AlertTriangle, Snowflake,
-  Wifi, KeyRound, Route, PauseCircle, Bell,
+  Wifi, KeyRound, Route, PauseCircle, Bell, MessagesSquare,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -567,9 +568,6 @@ const DriverDrawer: React.FC<{
               {driver.carYear && (
                 <Detail icon={<Calendar size={11} />} label="Year" value={driver.carYear} />
               )}
-              <Detail icon={<Truck size={11} />} label="Freight" value={
-                <span className={isFreight(driver) ? 'text-green' : ''}>{isFreight(driver) ? 'Yes' : 'No'}</span>
-              } />
               <Detail icon={<Radio size={11} />} label="Ride Types Received" full
                       value={<ServedTypes served={served} />} />
             </div>
@@ -598,7 +596,7 @@ const DriverDrawer: React.FC<{
             <div className="dv-photo-row">
               <DocThumb src={licenceImg} label="Licence — Front" onOpen={setLightbox} />
               <DocThumb src={licenceBackImg} label="Licence — Back" onOpen={setLightbox} />
-              {cnicImg && <DocThumb src={cnicImg} label="CNIC (legacy upload)" onOpen={setLightbox} />}
+              {cnicImg && <DocThumb src={cnicImg} label="CNIC" onOpen={setLightbox} />}
             </div>
             {licenceImg && !licenceBackImg && (
               <p className="verify-hint">
@@ -857,6 +855,9 @@ const DriverDrawer: React.FC<{
                 <button className="dv-revoke-btn" onClick={() => onNotify(uid)} disabled={working !== null}>
                   <Bell size={16} /> Notify this driver
                 </button>
+                <Link className="dv-revoke-btn" to={`/support-chat?uid=${encodeURIComponent(uid)}`}>
+                  <MessagesSquare size={16} /> Message in support chat
+                </Link>
               </div>
               {status !== 'approved' && (
                 <p className="verify-hint" style={{ justifyContent: 'center' }}>
@@ -892,7 +893,7 @@ const DriverCard: React.FC<{
   return (
     <div className="dv-card" onClick={onClick}>
       {/* Avatar */}
-      <div className={`dv-card-avatar ${isFreight(driver) ? 'freight' : ''}`}>
+      <div className="dv-card-avatar">
         {initials}
       </div>
 
@@ -907,9 +908,6 @@ const DriverCard: React.FC<{
             {title ? ` · ${title}` : ''}
             {driver.carPlate ? ` · ${driver.carPlate}` : ''}
           </span>
-          {isFreight(driver) && vehicleType !== 'freight' && (
-            <span className="dv-freight-chip"><Truck size={11} /> Freight</span>
-          )}
           {getOwnership(driver) === 'driver' && (
             <span className="dv-freight-chip" title={`Owner: ${getOwnerName(driver) || 'not given'}`}>
               <KeyRound size={11} /> Not the owner
@@ -974,7 +972,7 @@ export const Drivers: React.FC = () => {
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>('any');
   const [sort, setSort] = useState<SortKey>('newest');
   // null: closed; [] : opened from the header; [uid]: opened from a driver's drawer.
-  const [notifyFor, setNotifyFor] = useState<string[] | null>(null);
+  const [notifyFor, setNotifyFor] = useState<{ uids: string[]; kind: ContactKind } | null>(null);
   const activity = useDriverActivity();
 
   useEffect(() => {
@@ -1107,11 +1105,16 @@ export const Drivers: React.FC = () => {
       <div className="page-head">
         <div>
           <h1>Driver Applications</h1>
-          <p>Check each vehicle and its documents against the applicant's ID, then approve, reject or notify.</p>
+          <p>Check each vehicle and its documents against the applicant's ID, then approve, reject, message or notify.</p>
         </div>
-        <button className="page-head-btn" onClick={() => setNotifyFor([])} disabled={loading}>
-          <Bell size={15} /> Notify drivers
-        </button>
+        <div className="page-head-actions">
+          <button className="page-head-btn secondary" onClick={() => setNotifyFor({ uids: [], kind: 'message' })} disabled={loading}>
+            <MessagesSquare size={15} /> Message drivers
+          </button>
+          <button className="page-head-btn" onClick={() => setNotifyFor({ uids: [], kind: 'notification' })} disabled={loading}>
+            <Bell size={15} /> Notify drivers
+          </button>
+        </div>
       </div>
 
       {/* Status filter pills */}
@@ -1158,7 +1161,7 @@ export const Drivers: React.FC = () => {
           <Car size={14} />
           <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
             <option value="all">All vehicle types ({drivers.length})</option>
-            {VEHICLE_FILTERS.map(o => (
+            {VEHICLE_FILTERS.filter(o => o.vehicleType !== 'freight').map(o => (
               <option key={o.id} value={o.id}>{o.label} ({typeCounts[o.id] || 0})</option>
             ))}
             {typeCounts['car_untiered'] > 0 && (
@@ -1251,7 +1254,7 @@ export const Drivers: React.FC = () => {
           liveRide={rideOf(selected)}
           onClose={() => setSelected(null)}
           onDecide={handleDecide}
-          onNotify={uid => setNotifyFor([uid])}
+          onNotify={uid => setNotifyFor({ uids: [uid], kind: 'notification' })}
         />
       )}
 
@@ -1259,7 +1262,8 @@ export const Drivers: React.FC = () => {
         <NotifyComposer
           scope="drivers"
           recipients={toDriverRecipients(drivers)}
-          preselected={notifyFor}
+          preselected={notifyFor.uids}
+          initialKind={notifyFor.kind}
           noun={{ one: 'driver', many: 'drivers' }}
           segmentLabels={{ verified: 'Verified (approved)', unverified: 'Not approved yet' }}
           onClose={() => setNotifyFor(null)}

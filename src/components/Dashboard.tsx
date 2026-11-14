@@ -5,11 +5,11 @@ import { ref, onValue, off } from 'firebase/database';
 import { db, rtdb } from '../firebase';
 import { StatCard } from './StatCard';
 import { getPlatform, getVerification, type UserSchemaFields } from '../utils/userSchema';
-import { getStatus, isFreight, type DriverApplicationFields } from '../utils/driverSchema';
+import { getStatus, type DriverApplicationFields } from '../utils/driverSchema';
 import { formatPKR } from '../utils/rideTaxonomy';
 import {
   Users, Smartphone, ShieldCheck, ShieldAlert,
-  Car, Bike, Truck, Navigation, CheckCircle, XCircle,
+  Car, Navigation, CheckCircle, XCircle,
   Clock, Globe, DollarSign, TrendingUp,
   MessageSquare, AlertCircle, Activity, CalendarCheck
 } from 'lucide-react';
@@ -65,8 +65,6 @@ interface StatsState {
     total: number | null;
     verified: number | null;
     unverified: number | null;
-    freight: number | null;
-    nonFreight: number | null;
   };
   trips: {
     total: number | null;
@@ -88,7 +86,7 @@ interface StatsState {
 
 const initialState: StatsState = {
   users:     { total: null, android: null, ios: null, verified: null, unverified: null, pending: null },
-  drivers:   { total: null, verified: null, unverified: null, freight: null, nonFreight: null },
+  drivers:   { total: null, verified: null, unverified: null },
   trips:     { total: null, active: null, pending: null, completed: null, cancelled: null, today: null, intercity: null, revenue: null, avgFare: null },
   complaints:{ total: null, open: null, closed: null },
 };
@@ -137,15 +135,12 @@ export const Dashboard: React.FC = () => {
         if (!mounted) return;
         const docs: DriverApplicationFields[] = [];
         snap.forEach(d => docs.push(d.data() as DriverApplicationFields));
-        const frgt = docs.filter(isFreight).length;
         setStats(p => ({
           ...p,
           drivers: {
             total:      docs.length,
             verified:   docs.filter(d => getStatus(d) === 'approved').length,
             unverified: docs.filter(d => getStatus(d) !== 'approved').length,
-            freight:    frgt,
-            nonFreight: Math.max(0, docs.length - frgt),
           }
         }));
       } catch (e) { console.warn('Drivers stats error', e); }
@@ -274,8 +269,6 @@ export const Dashboard: React.FC = () => {
           <StatCard title="Total Drivers"       value={stats.drivers.total}      icon={<Car />}        color="var(--accent-purple)" onClick={() => navigate('/drivers')} />
           <StatCard title="Verified Drivers"    value={stats.drivers.verified}   icon={<ShieldCheck />}color="var(--accent-green)"  onClick={() => navigate('/drivers')} />
           <StatCard title="Unverified Drivers"  value={stats.drivers.unverified} icon={<ShieldAlert />}color="var(--accent-orange)" onClick={() => navigate('/drivers')} />
-          <StatCard title="Freight-Enabled"     value={stats.drivers.freight}    icon={<Truck />}      color="var(--accent-red)"    onClick={() => navigate('/drivers')} />
-          <StatCard title="Standard Drivers"    value={stats.drivers.nonFreight} icon={<Bike />}       color="var(--accent-blue)"   onClick={() => navigate('/drivers')} />
         </div>
       </div>
 

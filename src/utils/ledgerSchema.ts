@@ -4,7 +4,8 @@
 // and the app agree on every number:
 //
 // Driver: every movement of the prepaid wallet (`wallets/{uid}/entries`) —
-// top-ups in, commission out, refunds, reversals — plus what each finished
+// money added (card / wallet payments and manual credits), commission out,
+// refunds — plus what each finished
 // trip earned. Fares are paid to the driver directly, so "earnings" are the
 // fares of completed trips, and "net" is those fares less the commission the
 // wallet paid on them.
@@ -20,7 +21,7 @@ import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firesto
 import { db } from '../firebase';
 import { toMs, toNum, inPeriod, extractLocation, type PeriodRange } from './firebaseValues';
 import { cabtypeLabel } from './rideTaxonomy';
-import { isInstantTopup } from './walletSchema';
+import { topupEntryNote } from './walletSchema';
 import type { Cell, SheetSpec } from './excelExport';
 
 type Data = Record<string, unknown>;
@@ -160,11 +161,10 @@ export interface TripRow {
 // ─── Wallet ──────────────────────────────────────────────────────────────────
 
 export type WalletEntryType =
-  | 'topup' | 'topup_reversal' | 'commission' | 'ctc_commission' | 'ctc_commission_refund' | 'other';
+  | 'topup' | 'commission' | 'ctc_commission' | 'ctc_commission_refund' | 'other';
 
 export const ENTRY_LABEL: Record<WalletEntryType, string> = {
   topup: 'Balance added',
-  topup_reversal: 'Top-up reversed',
   commission: 'Commission · in-city ride',
   ctc_commission: 'Commission · city to city',
   ctc_commission_refund: 'Commission refunded',
@@ -178,19 +178,19 @@ export interface WalletRow {
   /** Signed: positive into the wallet, negative out of it. */
   amount: number;
   balanceAfter: number | null;
-  /** What it was for — a ride id, booking or top-up request id. */
+  /** What it was for — a ride id, booking or Safepay payment id. */
   reference: string;
-  /** "Added instantly", "Approved by …", a reversal's reason. */
+  /** "Paid by card", "Added by …". */
   note: string;
 }
 
-const ENTRY_TYPES: WalletEntryType[] = ['topup', 'topup_reversal', 'commission', 'ctc_commission', 'ctc_commission_refund'];
+const ENTRY_TYPES: WalletEntryType[] = ['topup', 'commission', 'ctc_commission', 'ctc_commission_refund'];
 const entryType = (raw: unknown): WalletEntryType =>
   ENTRY_TYPES.includes(raw as WalletEntryType) ? (raw as WalletEntryType) : 'other';
 
 const isCommissionType = (t: WalletEntryType) =>
   t === 'commission' || t === 'ctc_commission' || t === 'ctc_commission_refund';
-const isTopupType = (t: WalletEntryType) => t === 'topup' || t === 'topup_reversal';
+const isTopupType = (t: WalletEntryType) => t === 'topup';
 
 // ─── Driver ledger ───────────────────────────────────────────────────────────
 
@@ -200,7 +200,7 @@ export interface DriverLedger {
 }
 
 export interface DriverTotals {
-  /** Top-ups less reversals. */
+  /** Card / wallet payments and manual credits. */
   added: number;
   /** Commission paid, net of refunds. */
   commission: number;
@@ -264,11 +264,7 @@ export const buildDriverLedger = (input: {
       reference = str(e.reference);
     }
     if (type === 'topup') {
-      note = isInstantTopup({ method: str(e.method), by: str(e.by) })
-        ? 'Added instantly'
-        : `Approved by ${str(e.by) || '—'}`;
-    } else if (type === 'topup_reversal') {
-      note = [str(e.reason), e.by ? `reversed by ${str(e.by)}` : ''].filter(Boolean).join(' · ');
+      note = topupEntryNote({ type, method: str(e.method), paidWith: str(e.paidWith), by: str(e.by) });
     }
     wallet.push({
       id,

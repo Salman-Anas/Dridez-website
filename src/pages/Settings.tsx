@@ -2,8 +2,8 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
-  CABTYPES, RATE_GROUP_LABEL, RATE_FALLBACK_CHAIN, LEGACY_RATE_KEYS,
-  CANONICAL_RATE_KEYS, COMMISSION_KEYS, COMMISSION_META, COMMISSION_CHAIN,
+  CABTYPES, RATE_GROUP_LABEL, RATE_FALLBACK_CHAIN,
+  COMMISSION_KEYS, COMMISSION_META, COMMISSION_CHAIN,
   resolveRate, resolveCommission, parseRate, formatPKR, FARE_BASE,
   baseFareKey, resolveBaseFare, quotedFare,
   type CabtypeMeta, type CommissionKey, type RateGroup, type RatesMap,
@@ -344,12 +344,6 @@ const CommissionCard: React.FC<CommissionCardProps> = ({
 
 // ─── Main Settings Page Component ────────────────────────────────────────────
 
-/** Keys the portal understands, so anything else can be surfaced as custom. */
-const KNOWN_KEYS = new Set<string>([
-  ...CANONICAL_RATE_KEYS,
-  ...LEGACY_RATE_KEYS.map(k => k.key),
-]);
-
 export const Settings: React.FC = () => {
   const [rates, setRates] = useState<RatesMap>({});
   const [loading, setLoading] = useState(true);
@@ -410,7 +404,6 @@ export const Settings: React.FC = () => {
     return !r.missing && r.fromFallback;
   });
 
-  const extraKeys = Object.keys(rates).filter(k => !KNOWN_KEYS.has(k));
 
   const cardProps = (key: string) => ({
     editing: editingKey === key,
@@ -523,37 +516,6 @@ export const Settings: React.FC = () => {
               ))}
             </div>
           </div>
-
-          {/* Keys in the document the portal does not recognise */}
-          {extraKeys.length > 0 && (
-            <div className="stat-section">
-              <h2 className="section-title">
-                <DollarSign size={22} />
-                <span>Unrecognised Keys</span>
-                <span className="rate-badge-title" style={{ background: 'rgba(100, 116, 139, 0.12)', color: '#64748b' }}>
-                  {extraKeys.length}
-                </span>
-              </h2>
-              <p className="legacy-intro">
-                Present in <span className="mono">rates/rates</span> but neither a current key nor a
-                known legacy one. They are listed rather than deleted, because nothing here can tell
-                whether some app build still reads them.
-              </p>
-              <div className="rate-cards-grid">
-                {extraKeys.map(k => (
-                  <div className="rate-card legacy-card" key={k}>
-                    <div className="rate-card-header">
-                      <div className="rate-card-key mono legacy-card-key">{k}</div>
-                      <span className="rate-card-tag">Unknown</span>
-                    </div>
-                    <div className="rate-card-body">
-                      <div className="legacy-value">{String(rates[k])}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           <div className="settings-note-box">
             <div className="snb-icon"><AlertCircle size={22} /></div>

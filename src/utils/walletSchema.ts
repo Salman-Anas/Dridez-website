@@ -18,7 +18,6 @@ export interface WalletDoc {
   uid: string;
   balance?: unknown;
   currency?: string;
-  openingCredit?: unknown;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -37,15 +36,14 @@ export interface LedgerEntry {
   balanceAfter?: unknown;
   at?: unknown;
   /**
-   * Top-ups and reversals. `method` is "bank_transfer" when an admin approved
-   * the top-up and "bank_transfer_instant" (with `by: "auto"`) when the
-   * `requestTopup` function credited it at once; `reference` is the
-   * `topupRequests` id; `reason` is a reversal's.
+   * Money added (`type: "topup"`). `method` is "safepay" for a card or wallet
+   * payment (`paidWith` says which; `reference` is the safepayPayments id) or
+   * "manual" for a credit an admin added (`by` is who).
    */
   method?: string;
+  paidWith?: string;
   reference?: string;
   by?: string;
-  reason?: string;
 }
 
 export type LedgerType =
@@ -53,7 +51,6 @@ export type LedgerType =
   | 'ctc_commission'
   | 'ctc_commission_refund'
   | 'topup'
-  | 'topup_reversal'
   | 'unknown';
 
 /** Which way the money moved, from the platform's point of view. */
@@ -66,14 +63,13 @@ export const LEDGER_META: Record<LedgerType, {
   commission:            { label: 'In-city commission',      direction: 'earned' },
   ctc_commission:        { label: 'City-to-city commission', direction: 'earned' },
   ctc_commission_refund: { label: 'Commission refunded',     direction: 'returned' },
-  topup:                 { label: 'Wallet top-up',           direction: 'credited' },
-  topup_reversal:        { label: 'Top-up reversed',         direction: 'returned' },
+  topup:                 { label: 'Balance added',           direction: 'credited' },
   unknown:               { label: 'Other movement',          direction: 'unknown' },
 };
 
 export const normaliseLedgerType = (raw?: string): LedgerType => {
   const t = (raw || '').toLowerCase().trim();
-  if (t === 'commission' || t === 'ctc_commission' || t === 'ctc_commission_refund' || t === 'topup' || t === 'topup_reversal') {
+  if (t === 'commission' || t === 'ctc_commission' || t === 'ctc_commission_refund' || t === 'topup') {
     return t;
   }
   return 'unknown';
@@ -92,7 +88,7 @@ export const LEDGER_SOURCE_LABEL: Record<LedgerSource, string> = {
   city_ride: 'City-to-city ride',
   seat_booking: 'Seat booking',
   refund: 'Refund',
-  topup: 'Top-up',
+  topup: 'Balance added',
   other: 'Other',
 };
 
@@ -101,8 +97,7 @@ export const ledgerSource = (entry: LedgerEntry): LedgerSource => {
     case 'commission': return 'in_city';
     case 'ctc_commission': return entry.bookingId ? 'seat_booking' : 'city_ride';
     case 'ctc_commission_refund': return 'refund';
-    case 'topup':
-    case 'topup_reversal': return 'topup';
+    case 'topup': return 'topup';
     default: return 'other';
   }
 };
@@ -120,20 +115,19 @@ export const ledgerRideId = (entry: LedgerEntry): string | null => {
   return null;
 };
 
-/** A top-up the server credited instantly, rather than one an admin approved. */
-export const isInstantTopup = (entry: Pick<LedgerEntry, 'method' | 'by'>): boolean =>
-  entry.method === 'bank_transfer_instant' || entry.by === 'auto';
+const PAID_WITH_LABEL: Record<string, string> = {
+  card: 'card', jazzcash: 'JazzCash', easypaisa: 'Easypaisa',
+};
 
-/** How a top-up or reversal came about: "Added instantly", "Approved by …". */
-export const topupEntryNote = (entry: LedgerEntry): string => {
-  switch (normaliseLedgerType(entry.type)) {
-    case 'topup':
-      return isInstantTopup(entry) ? 'Added instantly' : `Approved by ${entry.by || '—'}`;
-    case 'topup_reversal':
-      return `Reversed by ${entry.by || '—'}`;
-    default:
-      return '';
+/** How money was added: "Paid by card", "Added by admin@…". */
+export const topupEntryNote = (entry: Pick<LedgerEntry, 'type' | 'method' | 'paidWith' | 'by'>): string => {
+  if (normaliseLedgerType(entry.type) !== 'topup') return '';
+  if (entry.method === 'safepay') {
+    const via = entry.paidWith ? PAID_WITH_LABEL[entry.paidWith.toLowerCase()] ?? entry.paidWith : '';
+    return via ? `Paid by ${via}` : 'Paid through Safepay';
   }
+  if (entry.method === 'manual') return `Added by ${entry.by || 'an admin'}`;
+  return entry.by ? `Added by ${entry.by}` : 'Balance added';
 };
 
 /** The magnitude of an entry in rupees — always positive. */
@@ -150,7 +144,7 @@ export interface WalletTotals {
   refunded: number;
   /** What the platform actually kept: earned − refunded. */
   net: number;
-  /** Credit added to the wallet — top-ups less reversed instant top-ups. */
+  /** Money added to the wallet: card / wallet payments and manual credits. */
   toppedUp: number;
   /** Number of rides that produced a commission charge. */
   chargeCount: number;
@@ -175,10 +169,6 @@ export const summariseEntries = (entries: LedgerEntry[]): WalletTotals => {
         break;
       case 'topup':
         t.toppedUp += amount;
-        break;
-      case 'topup_reversal':
-        // An instant top-up that didn't check out, taken back.
-        t.toppedUp -= amount;
         break;
       default:
         break;

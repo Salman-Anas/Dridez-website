@@ -10,6 +10,7 @@ import { Payments } from './pages/Payments';
 import { DriverAccounts } from './pages/DriverAccounts';
 import { Settings } from './pages/Settings';
 import { Tickets } from './pages/Tickets';
+import { SupportChat } from './pages/SupportChat';
 import { RecoverData } from './pages/RecoverData';
 import { PrivacyPolicy } from './pages/PrivacyPolicy';
 import { Login } from './pages/Login';
@@ -32,6 +33,7 @@ function App() {
             <Route path="payments" element={<Payments />} />
             <Route path="driver-accounts" element={<DriverAccounts />} />
             <Route path="tickets" element={<Tickets />} />
+            <Route path="support-chat" element={<SupportChat />} />
             <Route path="settings" element={<Settings />} />
             <Route path="tasks" element={<Tasks />} />
           </Route>
