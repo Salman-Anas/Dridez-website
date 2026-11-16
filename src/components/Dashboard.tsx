@@ -254,11 +254,11 @@ export const Dashboard: React.FC = () => {
         <h2 className="section-title section-title-link" onClick={() => navigate('/users')}><Users size={20} /> Users Overview <span className="section-nav-arrow">→</span></h2>
         <div className="stats-grid">
           <StatCard title="Total Customers"  value={stats.users.total}      icon={<Users />}       color="var(--accent-blue)"   onClick={() => navigate('/users')} />
-          <StatCard title="Android Users"    value={stats.users.android}    icon={<Smartphone />}  color="var(--accent-green)"  onClick={() => navigate('/users?filter=android')} />
-          <StatCard title="iOS Users"        value={stats.users.ios}        icon={<Smartphone />}  color="var(--accent-purple)" onClick={() => navigate('/users?filter=ios')} />
-          <StatCard title="Verified Users"   value={stats.users.verified}   icon={<ShieldCheck />} color="var(--accent-green)"  onClick={() => navigate('/users?filter=verified')} />
-          <StatCard title="Unverified Users" value={stats.users.unverified} icon={<ShieldAlert />} color="var(--accent-orange)" onClick={() => navigate('/users?filter=unverified')} />
-          <StatCard title="Awaiting Review"  value={stats.users.pending}    icon={<Clock />}       color="var(--accent-cyan)"   onClick={() => navigate('/users?filter=pending')} />
+          <StatCard title="Android Users"    value={stats.users.android}    icon={<Smartphone />}  color="var(--accent-green)"  onClick={() => navigate('/users?device=android')} />
+          <StatCard title="iOS Users"        value={stats.users.ios}        icon={<Smartphone />}  color="var(--accent-purple)" onClick={() => navigate('/users?device=ios')} />
+          <StatCard title="Verified Users"   value={stats.users.verified}   icon={<ShieldCheck />} color="var(--accent-green)"  onClick={() => navigate('/users?status=verified')} />
+          <StatCard title="Unverified Users" value={stats.users.unverified} icon={<ShieldAlert />} color="var(--accent-orange)" onClick={() => navigate('/users?status=unverified')} />
+          <StatCard title="Awaiting Review"  value={stats.users.pending}    icon={<Clock />}       color="var(--accent-cyan)"   onClick={() => navigate('/users?status=pending')} />
         </div>
       </div>
 

@@ -6142,3 +6142,87 @@ a.dv-revoke-btn {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ── City to city: who posted it ────────────────────────────────────────── */
+
+.ride-type-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.posted-by-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.posted-by-passenger {
+  background: rgba(31, 78, 216, 0.1);
+  color: var(--accent-blue);
+}
+
+.posted-by-driver {
+  background: rgba(5, 150, 105, 0.1);
+  color: var(--accent-green);
+}
+
+/* Seats booked on a driver's trip. */
+.trip-bookings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.trip-bookings li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.trip-bookings li + li {
+  border-top: 1px solid #eef1f6;
+}
+
+.trip-bookings li.cancelled {
+  opacity: 0.6;
+}
+
+.trip-bookings strong {
+  display: block;
+  font-size: 13.5px;
+}
+
+.trip-bookings .cell-dim {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.trip-booking-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.trip-booking-meta > span:not(.ride-status-pill) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

@@ -226,7 +226,7 @@ const ServedTypes: React.FC<{ served: string[]; compact?: boolean }> = ({ served
           className={`dv-serves-chip${isBookableCabtype(key) ? '' : ' dv-serves-chip-warn'}`}
           title={isBookableCabtype(key)
             ? `Receives ${cabtypeLabel(key)} requests`
-            : `"${key}" is not one of the nine rider-facing ride types — no rider can request it`}
+            : `"${key}" is not one of the nine ride types passengers can book — no passenger can request it`}
         >
           {cabtypeLabel(key)}
         </span>
@@ -1159,7 +1159,7 @@ export const Drivers: React.FC = () => {
         <button
           className={`dv-filter-pill dv-filter-live ${activityFilter === 'on_ride' ? 'active' : ''}`}
           onClick={() => setActivityFilter(a => a === 'on_ride' ? 'any' : 'on_ride')}
-          title="Heading to a pickup, carrying a rider, or on a city-to-city trip"
+          title="Heading to a pickup, carrying a passenger, or on a city-to-city trip"
         >
           <Route size={13} /> In a ride
           <span className="dv-pill-count">{activity.loading ? '…' : activityCounts.on_ride}</span>

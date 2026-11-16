@@ -113,7 +113,7 @@ export const RideChat: React.FC<Props> = ({ rideId, riderUid, driverUid }) => {
           <div key={m.key} className={`chat-row chat-row-${side}`}>
             <div className="chat-bubble">
               <div className="chat-sender">
-                {side === 'rider' ? 'Rider' : side === 'driver' ? 'Driver' : 'Unknown sender'}
+                {side === 'rider' ? 'Passenger' : side === 'driver' ? 'Driver' : 'Unknown sender'}
               </div>
               <div className="chat-text">{m.msg || <em>empty message</em>}</div>
               <div className="chat-time">{ms ? formatStamp(ms) : '—'}</div>

@@ -12,7 +12,7 @@ import {
   Navigation, Clock, CheckCircle, XCircle, AlertCircle,
   Car, Truck, Bike, MapPin, X, User, Phone, Shield,
   Package, Calendar, ChevronRight, Loader, Globe,
-  Activity, Hash, Filter, Snowflake, MessageSquare,
+  Activity, Hash, Filter, Snowflake, MessageSquare, Users as UsersIcon, Armchair,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -20,9 +20,28 @@ import {
 // Firebase location objects can have many shapes — keep it open
 type RideLocation = Record<string, unknown>;
 
+/** A seat booked on a driver's trip (driver_trip_bookings). */
+interface TripBooking {
+  id: string;
+  rider?: string;
+  riderName?: string;
+  riderPhone?: string;
+  seats?: number;
+  fare?: number;
+  status?: string;
+}
+
+/**
+ * Where a ride came from. City to city has two kinds: a passenger posts a
+ * request and drivers send offers (`citytocity`), or a driver posts a trip and
+ * passengers book seats on it (`drivertrip`, from `driver_trips`).
+ */
+type RideSource = 'rtdb' | 'firestore' | 'citytocity' | 'drivertrip';
+
 interface Ride {
   id: string;
-  source: 'rtdb' | 'firestore' | 'citytocity';
+  source: RideSource;
+  /** The passenger's uid. The field keeps the app's name for it. */
   rider?: string;
   driver?: string;
   pickup?: string | RideLocation;
@@ -52,9 +71,19 @@ interface Ride {
   receiver?: string;
   passengers?: number | string;
   detail?: string;
+  /** Driver's trips only. */
+  departAt?: number;
+  seats?: number;
+  seatsLeft?: number;
+  farePerSeat?: number;
+  driverName?: string;
+  driverPhone?: string;
+  vehicle?: string;
+  notes?: string;
+  bookings?: TripBooking[];
 }
 
-interface RiderInfo {
+interface PassengerInfo {
   name?: string;
   phone?: string;
   os?: string;
@@ -77,6 +106,17 @@ type FilterType = 'all' | 'active' | 'pending' | 'completed' | 'cancelled';
 type TimePeriod = 'today' | 'week' | 'month' | 'year' | 'all' | 'custom';
 type VehicleFilter = RideVehicle | 'all';
 type VariantFilter = RideVariant | 'all';
+/** Who posted a city-to-city ride: the passenger (a request) or the driver (a trip). */
+type PostedByFilter = 'any' | 'passenger' | 'driver';
+
+const POSTED_BY_LABEL: Record<PostedByFilter, string> = {
+  any: 'Any',
+  passenger: "Passenger's requests",
+  driver: "Driver's trips",
+};
+
+const matchesPostedBy = (ride: Ride, f: PostedByFilter): boolean =>
+  f === 'any' || (f === 'passenger' ? ride.source === 'citytocity' : ride.source === 'drivertrip');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -152,6 +192,7 @@ const toMs = (v: unknown): number => {
  * to the bottom of the list and hid them from every period filter.
  */
 const rideMs = (ride: Ride): number =>
+  (ride.source === 'drivertrip' ? toMs(ride.departAt) : 0) ||
   toMs(ride.completedAt) || toMs(ride.cancelledAt) || toMs(ride.createdAt) ||
   toMs(ride.acceptedAt) || toMs(ride.time) || toMs(ride.date);
 
@@ -174,11 +215,26 @@ const formatTime = (ride: Ride): string => {
 
 const normalizeStatus = (status?: string): string => (status || 'unknown').toLowerCase();
 
+/** A driver's trip counts as upcoming until an hour after it leaves (as in the app). */
+const TRIP_UPCOMING_GRACE_MS = 60 * 60 * 1000;
+
+/**
+ * The status to show and filter by. A driver's trip only stores open / full /
+ * cancelled, so once it has left it reads as "departed".
+ */
+const rideStatus = (ride: Ride): string => {
+  const s = normalizeStatus(ride.status);
+  if (ride.source !== 'drivertrip' || s === 'cancelled') return s;
+  const departAt = toMs(ride.departAt);
+  return departAt && departAt + TRIP_UPCOMING_GRACE_MS < Date.now() ? 'departed' : s;
+};
+
 // Status spellings are exact in the app — `inprogress` and `started` for a live
-// in-city trip, `accepted` and `ontrip` for city-to-city.
-const isActive = (s: string) => ['inprogress', 'ongoing', 'started', 'active', 'accepted', 'ontrip'].includes(s);
+// in-city trip, `accepted` and `ontrip` for city-to-city, `open` and `full` for
+// a driver's trip still taking bookings.
+const isActive = (s: string) => ['inprogress', 'ongoing', 'started', 'active', 'accepted', 'ontrip', 'open', 'full'].includes(s);
 const isPending = (s: string) => ['pending', 'searching', 'waiting'].includes(s);
-const isCompleted = (s: string) => ['completed', 'finished', 'done'].includes(s);
+const isCompleted = (s: string) => ['completed', 'finished', 'done', 'departed'].includes(s);
 const isCancelled = (s: string) => ['cancelled', 'canceled', 'rejected'].includes(s);
 
 /**
@@ -187,8 +243,21 @@ const isCancelled = (s: string) => ['cancelled', 'canceled', 'rejected'].include
  * so the key is resolved through the shared taxonomy instead.
  */
 const getRideType = (ride: Ride): string => {
-  if (ride.source === 'citytocity') return 'intercity';
+  if (ride.source === 'citytocity' || ride.source === 'drivertrip') return 'intercity';
   return (ride.cabtype || ride.rideCategory || '').toLowerCase().trim();
+};
+
+/** Driver's trips are city to city too; the taxonomy knows them by that source. */
+const classify = (ride: Ride) =>
+  classifyRide(ride.source === 'drivertrip' ? { ...ride, source: 'citytocity' } : ride);
+
+const isCityToCity = (ride: Ride) => ride.source === 'citytocity' || ride.source === 'drivertrip';
+
+const fareText = (ride: Ride): string => {
+  if (ride.source === 'drivertrip') {
+    return ride.farePerSeat != null ? `${formatPKR(Number(ride.farePerSeat))} / seat` : '—';
+  }
+  return ride.price != null ? formatPKR(Number(ride.price)) : '—';
 };
 
 const isFreightRide = (ride: Ride): boolean =>
@@ -220,6 +289,17 @@ const TypeBadge: React.FC<{ type: string }> = ({ type }) => {
   );
 };
 
+/** Who posted a city-to-city ride: a passenger's request, or a driver's trip. */
+const PostedByTag: React.FC<{ ride: Ride }> = ({ ride }) => {
+  if (ride.source === 'citytocity') {
+    return <span className="posted-by-tag posted-by-passenger"><User size={10} /> Passenger&apos;s request</span>;
+  }
+  if (ride.source === 'drivertrip') {
+    return <span className="posted-by-tag posted-by-driver"><Car size={10} /> Driver&apos;s trip</span>;
+  }
+  return null;
+};
+
 const StatusPill: React.FC<{ status: string }> = ({ status }) => {
   const s = normalizeStatus(status);
   let cls = 'ride-status-pill';
@@ -247,18 +327,18 @@ const VariantChip: React.FC<{ variant: RideVariant | null }> = ({ variant }) => 
 // ─── Ride Detail Modal ────────────────────────────────────────────────────────
 
 const RideDetailModal: React.FC<{ ride: Ride; onClose: () => void }> = ({ ride, onClose }) => {
-  const [rider, setRider] = useState<RiderInfo | null>(null);
+  const [passenger, setPassenger] = useState<PassengerInfo | null>(null);
   const [driver, setDriver] = useState<DriverInfo | null>(null);
-  const [loadingRider, setLoadingRider] = useState(false);
+  const [loadingPassenger, setLoadingPassenger] = useState(false);
   const [loadingDriver, setLoadingDriver] = useState(false);
 
   useEffect(() => {
     if (ride.rider) {
-      setLoadingRider(true);
+      setLoadingPassenger(true);
       getDoc(doc(db, 'users', ride.rider))
-        .then(snap => setRider(snap.exists() ? (snap.data() as RiderInfo) : null))
-        .catch(() => setRider(null))
-        .finally(() => setLoadingRider(false));
+        .then(snap => setPassenger(snap.exists() ? (snap.data() as PassengerInfo) : null))
+        .catch(() => setPassenger(null))
+        .finally(() => setLoadingPassenger(false));
     }
     if (ride.driver) {
       setLoadingDriver(true);
@@ -271,7 +351,9 @@ const RideDetailModal: React.FC<{ ride: Ride; onClose: () => void }> = ({ ride, 
 
   const rideType = getRideType(ride);
   const freight = isFreightRide(ride);
-  const { variant } = classifyRide(ride);
+  const { variant } = classify(ride);
+  const status = rideStatus(ride);
+  const isTrip = ride.source === 'drivertrip';
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -279,8 +361,9 @@ const RideDetailModal: React.FC<{ ride: Ride; onClose: () => void }> = ({ ride, 
         <div className="modal-header">
           <div className="modal-title-row">
             <TypeBadge type={rideType} />
+            <PostedByTag ride={ride} />
             <VariantChip variant={variant} />
-            <StatusPill status={ride.status || 'unknown'} />
+            <StatusPill status={status} />
           </div>
           <button className="modal-close-btn" onClick={onClose}><X size={20} /></button>
         </div>
@@ -311,8 +394,27 @@ const RideDetailModal: React.FC<{ ride: Ride; onClose: () => void }> = ({ ride, 
           {/* Trip Details */}
           <div className="modal-section">
             <h3 className="modal-section-title"><Activity size={16} /> Trip Details</h3>
+            {isTrip ? (
             <div className="modal-details-grid">
-              <div className="detail-item"><span className="di-label">Fare</span><span className="di-value">{ride.price != null ? formatPKR(Number(ride.price)) : '—'}</span></div>
+              <div className="detail-item"><span className="di-label">Posted by</span><span className="di-value">The driver, who takes seat bookings</span></div>
+              <div className="detail-item"><span className="di-label">Departs</span><span className="di-value">{formatTime(ride)}</span></div>
+              <div className="detail-item"><span className="di-label">Fare per seat</span><span className="di-value">{fareText(ride)}</span></div>
+              <div className="detail-item">
+                <span className="di-label">Seats</span>
+                <span className="di-value">
+                  {ride.seats != null ? `${Number(ride.seats) - Number(ride.seatsLeft ?? ride.seats)} of ${ride.seats} booked` : '—'}
+                </span>
+              </div>
+              {ride.vehicle && <div className="detail-item" style={{ gridColumn: '1 / -1' }}><span className="di-label">Vehicle</span><span className="di-value">{ride.vehicle}</span></div>}
+              {ride.notes && <div className="detail-item" style={{ gridColumn: '1 / -1' }}><span className="di-label">Driver&apos;s notes</span><span className="di-value">{ride.notes}</span></div>}
+              <div className="detail-item" style={{ gridColumn: '1 / -1' }}><span className="di-label">Trip ID</span><span className="di-value mono">{ride.id}</span></div>
+            </div>
+            ) : (
+            <div className="modal-details-grid">
+              {ride.source === 'citytocity' && (
+                <div className="detail-item"><span className="di-label">Posted by</span><span className="di-value">The passenger, who takes a driver&apos;s offer</span></div>
+              )}
+              <div className="detail-item"><span className="di-label">Fare</span><span className="di-value">{fareText(ride)}</span></div>
               <div className="detail-item"><span className="di-label">Distance</span><span className="di-value">{ride.distance ?? '—'}</span></div>
               <div className="detail-item"><span className="di-label">Duration</span><span className="di-value">{ride.duration ?? '—'}</span></div>
               <div className="detail-item"><span className="di-label">Time</span><span className="di-value">{formatTime(ride)}</span></div>
@@ -341,9 +443,10 @@ const RideDetailModal: React.FC<{ ride: Ride; onClose: () => void }> = ({ ride, 
               {ride.source === 'citytocity' && ride.passengers != null && (
                 <div className="detail-item"><span className="di-label">Passengers</span><span className="di-value">{String(ride.passengers)}</span></div>
               )}
-              <div className="detail-item"><span className="di-label">Source</span><span className="di-value">{ride.source === 'rtdb' ? 'Realtime DB' : ride.source === 'citytocity' ? 'Inter-City' : 'Firestore'}</span></div>
+              <div className="detail-item"><span className="di-label">Source</span><span className="di-value">{ride.source === 'rtdb' ? 'Live ride' : ride.source === 'citytocity' ? 'City to city' : 'Ride history'}</span></div>
               <div className="detail-item" style={{ gridColumn: '1 / -1' }}><span className="di-label">Ride ID</span><span className="di-value mono">{ride.id}</span></div>
             </div>
+            )}
           </div>
 
           {/* Delivery / freight payload */}
@@ -360,27 +463,55 @@ const RideDetailModal: React.FC<{ ride: Ride; onClose: () => void }> = ({ ride, 
             </div>
           )}
 
-          {/* Rider */}
+          {/* Passenger(s) */}
+          {isTrip ? (
+            <div className="modal-section">
+              <h3 className="modal-section-title">
+                <UsersIcon size={16} /> Passengers
+                <span className="rides-count-badge">{(ride.bookings ?? []).filter(b => b.status === 'confirmed').length}</span>
+              </h3>
+              {(ride.bookings ?? []).length === 0 ? (
+                <p className="modal-no-data">No seats booked on this trip yet.</p>
+              ) : (
+                <ul className="trip-bookings">
+                  {(ride.bookings ?? []).map(b => (
+                    <li key={b.id} className={b.status === 'cancelled' ? 'cancelled' : undefined}>
+                      <div>
+                        <strong>{b.riderName || 'Passenger'}</strong>
+                        <span className="cell-dim"><Phone size={11} /> {b.riderPhone || '—'}</span>
+                      </div>
+                      <div className="trip-booking-meta">
+                        <span><Armchair size={11} /> {b.seats ?? 0} {Number(b.seats) === 1 ? 'seat' : 'seats'}</span>
+                        <span>{b.fare != null ? formatPKR(Number(b.fare)) : '—'}</span>
+                        <StatusPill status={b.status || 'unknown'} />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : (
           <div className="modal-section">
-            <h3 className="modal-section-title"><User size={16} /> Rider Information</h3>
-            {loadingRider ? (
-              <div className="loading-row"><Loader size={16} className="spin" /> Loading rider…</div>
-            ) : rider ? (
+            <h3 className="modal-section-title"><User size={16} /> Passenger</h3>
+            {loadingPassenger ? (
+              <div className="loading-row"><Loader size={16} className="spin" /> Loading passenger…</div>
+            ) : passenger ? (
               <div className="modal-details-grid">
-                <div className="detail-item"><span className="di-label">Name</span><span className="di-value">{rider.name || '—'}</span></div>
-                <div className="detail-item"><span className="di-label"><Phone size={12} /> Phone</span><span className="di-value">{rider.phone || '—'}</span></div>
-                <div className="detail-item"><span className="di-label">OS</span><span className="di-value">{rider.os || '—'}</span></div>
+                <div className="detail-item"><span className="di-label">Name</span><span className="di-value">{passenger.name || '—'}</span></div>
+                <div className="detail-item"><span className="di-label"><Phone size={12} /> Phone</span><span className="di-value">{passenger.phone || '—'}</span></div>
+                <div className="detail-item"><span className="di-label">OS</span><span className="di-value">{passenger.os || '—'}</span></div>
                 <div className="detail-item">
                   <span className="di-label"><Shield size={12} /> Verified</span>
-                  <span className={`di-value ${rider.isVerified ? 'text-green' : 'text-orange'}`}>{rider.isVerified ? 'Yes' : 'No'}</span>
+                  <span className={`di-value ${passenger.isVerified ? 'text-green' : 'text-orange'}`}>{passenger.isVerified ? 'Yes' : 'No'}</span>
                 </div>
               </div>
             ) : ride.rider ? (
-              <p className="modal-no-data">Rider profile not found (UID: {ride.rider.slice(0, 10)}…)</p>
+              <p className="modal-no-data">Passenger profile not found (UID: {ride.rider.slice(0, 10)}…)</p>
             ) : (
-              <p className="modal-no-data">No rider UID on this record.</p>
+              <p className="modal-no-data">No passenger on this record.</p>
             )}
           </div>
+          )}
 
           {/* Driver */}
           <div className="modal-section">
@@ -418,16 +549,23 @@ const RideDetailModal: React.FC<{ ride: Ride; onClose: () => void }> = ({ ride, 
                   </div>
                 )}
               </>
+            ) : isTrip && (ride.driverName || ride.driverPhone) ? (
+              <div className="modal-details-grid">
+                <div className="detail-item"><span className="di-label">Name</span><span className="di-value">{ride.driverName || '—'}</span></div>
+                <div className="detail-item"><span className="di-label"><Phone size={12} /> Phone</span><span className="di-value">{ride.driverPhone || '—'}</span></div>
+              </div>
             ) : (
               <p className="modal-no-data">Driver profile not found (UID: {ride.driver.slice(0, 10)}…)</p>
             )}
           </div>
 
-          {/* Trip chat — rider ↔ driver, live from the Realtime Database */}
-          <div className="modal-section">
-            <h3 className="modal-section-title"><MessageSquare size={16} /> Trip Chat</h3>
-            <RideChat rideId={ride.id} riderUid={ride.rider} driverUid={ride.driver} />
-          </div>
+          {/* Trip chat — passenger ↔ driver, live from the Realtime Database */}
+          {!isTrip && (
+            <div className="modal-section">
+              <h3 className="modal-section-title"><MessageSquare size={16} /> Trip Chat</h3>
+              <RideChat rideId={ride.id} riderUid={ride.rider} driverUid={ride.driver} />
+            </div>
+          )}
 
           {/* Inter-city detail */}
           {ride.source === 'citytocity' && ride.detail && !freight && variant !== 'delivery' && (
@@ -450,6 +588,7 @@ export const Rides: React.FC = () => {
   const [filter, setFilter] = useState<FilterType>('all');
   const [vehicle, setVehicle] = useState<VehicleFilter>('all');
   const [variant, setVariant] = useState<VariantFilter>('all');
+  const [postedBy, setPostedBy] = useState<PostedByFilter>('any');
   const [period, setPeriod] = useState<TimePeriod>('all');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -473,6 +612,31 @@ export const Rides: React.FC = () => {
     return result;
   }, []);
 
+  /** Trips drivers posted, each with the seats booked on it. */
+  const loadDriverTrips = useCallback(async (): Promise<Ride[]> => {
+    const result: Ride[] = [];
+    try {
+      const [tripSnap, bookingSnap] = await Promise.all([
+        getDocs(collection(db, 'driver_trips')),
+        getDocs(collection(db, 'driver_trip_bookings')),
+      ]);
+      const byTrip = new Map<string, TripBooking[]>();
+      bookingSnap.forEach(d => {
+        const b = { id: d.id, ...d.data() } as TripBooking & { tripId?: string };
+        if (!b.tripId) return;
+        const list = byTrip.get(b.tripId);
+        if (list) list.push(b); else byTrip.set(b.tripId, [b]);
+      });
+      tripSnap.forEach(d => result.push({
+        id: d.id,
+        ...d.data(),
+        source: 'drivertrip',
+        bookings: byTrip.get(d.id) ?? [],
+      } as Ride));
+    } catch { /* silent */ }
+    return result;
+  }, []);
+
   useEffect(() => {
     let mounted = true;
     const rtdbRef = ref(rtdb, 'rides');
@@ -487,13 +651,14 @@ export const Rides: React.FC = () => {
         });
       }
       if (!mounted) return;
-      Promise.all([loadFirestoreRides(), loadCitytocityRides()]).then(([fsRides, c2cRides]) => {
+      Promise.all([loadFirestoreRides(), loadCitytocityRides(), loadDriverTrips()]).then(([fsRides, c2cRides, trips]) => {
         if (!mounted) return;
         const idSet = new Set<string>();
         const merged: Ride[] = [];
-        for (const r of [...rtdbRides, ...fsRides, ...c2cRides]) {
-          if (!idSet.has(r.id)) {
-            idSet.add(r.id);
+        for (const r of [...rtdbRides, ...fsRides, ...c2cRides, ...trips]) {
+          const key = `${r.source === 'drivertrip' ? 'trip' : 'ride'}:${r.id}`;
+          if (!idSet.has(key)) {
+            idSet.add(key);
             merged.push(r);
           }
         }
@@ -508,7 +673,7 @@ export const Rides: React.FC = () => {
       mounted = false;
       off(rtdbRef, 'value', handleRtdb);
     };
-  }, [loadFirestoreRides, loadCitytocityRides]);
+  }, [loadFirestoreRides, loadCitytocityRides, loadDriverTrips]);
 
   // ── Filtering ──────────────────────────────────────────────────────────────
   // The four axes are applied in stages so each filter row can show a count of
@@ -531,7 +696,7 @@ export const Rides: React.FC = () => {
 
   const matchesStatus = useCallback((r: Ride) => {
     if (filter === 'all') return true;
-    const s = normalizeStatus(r.status);
+    const s = rideStatus(r);
     if (filter === 'active') return isActive(s);
     if (filter === 'pending') return isPending(s);
     if (filter === 'completed') return isCompleted(s);
@@ -541,10 +706,10 @@ export const Rides: React.FC = () => {
 
   const counts = useMemo(() => ({
     all: periodRides.length,
-    active: periodRides.filter(r => isActive(normalizeStatus(r.status))).length,
-    pending: periodRides.filter(r => isPending(normalizeStatus(r.status))).length,
-    completed: periodRides.filter(r => isCompleted(normalizeStatus(r.status))).length,
-    cancelled: periodRides.filter(r => isCancelled(normalizeStatus(r.status))).length,
+    active: periodRides.filter(r => isActive(rideStatus(r))).length,
+    pending: periodRides.filter(r => isPending(rideStatus(r))).length,
+    completed: periodRides.filter(r => isCompleted(rideStatus(r))).length,
+    cancelled: periodRides.filter(r => isCancelled(rideStatus(r))).length,
   }), [periodRides]);
 
   /** Everything the two type filters choose from: period + status applied. */
@@ -554,42 +719,58 @@ export const Rides: React.FC = () => {
   );
 
   const classified = useMemo(
-    () => typePool.map(r => ({ ride: r, cls: classifyRide(r) })),
+    () => typePool.map(r => ({ ride: r, cls: classify(r) })),
     [typePool],
   );
 
   /** Vehicle counts reflect the variant already chosen, and vice versa. */
   const vehicleCounts = useMemo(() => {
     const c: Record<string, number> = { all: 0 };
-    for (const { cls } of classified) {
+    for (const { ride, cls } of classified) {
       if (variant !== 'all' && cls.variant !== variant) continue;
+      if (!matchesPostedBy(ride, postedBy)) continue;
       c.all += 1;
       c[cls.vehicle] = (c[cls.vehicle] || 0) + 1;
     }
     return c;
-  }, [classified, variant]);
+  }, [classified, variant, postedBy]);
 
   const variantCounts = useMemo(() => {
     const c: Record<string, number> = { all: 0 };
-    for (const { cls } of classified) {
+    for (const { ride, cls } of classified) {
       if (vehicle !== 'all' && cls.vehicle !== vehicle) continue;
+      if (!matchesPostedBy(ride, postedBy)) continue;
       c.all += 1;
       if (cls.variant) c[cls.variant] = (c[cls.variant] || 0) + 1;
     }
     return c;
-  }, [classified, vehicle]);
+  }, [classified, vehicle, postedBy]);
+
+  /** Posted-by counts reflect the ride type and AC / delivery already chosen. */
+  const postedByCounts = useMemo(() => {
+    const c: Record<PostedByFilter, number> = { any: 0, passenger: 0, driver: 0 };
+    for (const { ride, cls } of classified) {
+      if (vehicle !== 'all' && cls.vehicle !== vehicle) continue;
+      if (variant !== 'all' && cls.variant !== variant) continue;
+      c.any += 1;
+      if (ride.source === 'citytocity') c.passenger += 1;
+      if (ride.source === 'drivertrip') c.driver += 1;
+    }
+    return c;
+  }, [classified, vehicle, variant]);
 
   const filteredRides = useMemo(
     () => classified
       .filter(({ cls }) => (vehicle === 'all' || cls.vehicle === vehicle))
       .filter(({ cls }) => (variant === 'all' || cls.variant === variant))
+      .filter(({ ride }) => matchesPostedBy(ride, postedBy))
       .map(({ ride }) => ride),
-    [classified, vehicle, variant],
+    [classified, vehicle, variant, postedBy],
   );
 
-  const typeFiltersActive = vehicle !== 'all' || variant !== 'all';
+  const typeFiltersActive = vehicle !== 'all' || variant !== 'all' || postedBy !== 'any';
 
-  const clearAll = () => { setFilter('all'); setVehicle('all'); setVariant('all'); };
+  const clearAll = () => { setFilter('all'); setVehicle('all'); setVariant('all'); setPostedBy('any'); };
 
   const periods: { key: TimePeriod; label: string }[] = [
     { key: 'today', label: 'Today' },
@@ -614,6 +795,10 @@ export const Rides: React.FC = () => {
     const a = variant === 'all' ? null : RIDE_VARIANT_FILTERS.find(o => o.id === variant)?.label;
     const status = filter === 'all' ? '' : `${filter.charAt(0).toUpperCase()}${filter.slice(1)} `;
     const type = [v, a].filter(Boolean).join(' · ');
+    if (postedBy !== 'any') {
+      const what = POSTED_BY_LABEL[postedBy];
+      return `${status}${what}${type ? ` · ${type}` : ''}`;
+    }
     return type ? `${status}${type} rides` : `${status || 'All '}Rides`;
   })();
 
@@ -621,7 +806,7 @@ export const Rides: React.FC = () => {
     <div className="rides-page">
       <div className="dashboard-header" style={{ textAlign: 'left', marginBottom: '2rem' }}>
         <h1>Rides Management</h1>
-        <p>Real-time aggregated view across Realtime Database &amp; Firestore</p>
+        <p>Live and past rides, city-to-city requests from passengers and trips posted by drivers.</p>
       </div>
 
       {/* Time Period Filter */}
@@ -669,7 +854,7 @@ export const Rides: React.FC = () => {
         ))}
       </div>
 
-      {/* Ride type — the vehicle the rider asked for */}
+      {/* Ride type — the vehicle the passenger asked for */}
       <div className="ride-filter-block">
         <div className="ride-filter-label"><Car size={14} /> Ride type</div>
         <div className="dv-filter-row">
@@ -726,6 +911,27 @@ export const Rides: React.FC = () => {
         </div>
       </div>
 
+      {/* Third axis — who posted a city-to-city ride */}
+      <div className="ride-filter-block">
+        <div className="ride-filter-label"><Globe size={14} /> City to city</div>
+        <div className="dv-filter-row">
+          {(Object.keys(POSTED_BY_LABEL) as PostedByFilter[]).map(f => (
+            <button
+              key={f}
+              className={`dv-filter-pill ${postedBy === f ? 'active' : ''}`}
+              onClick={() => setPostedBy(postedBy === f && f !== 'any' ? 'any' : f)}
+              title={f === 'passenger'
+                ? 'Posted by a passenger; drivers send offers'
+                : f === 'driver' ? 'Posted by a driver; passengers book seats' : undefined}
+            >
+              {f === 'passenger' ? <User size={12} /> : f === 'driver' ? <Car size={12} /> : null}
+              {POSTED_BY_LABEL[f]}
+              <span className="dv-pill-count">{postedByCounts[f]}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Table Header */}
       <div className="rides-table-header">
         <span className="rides-table-title">
@@ -773,14 +979,19 @@ export const Rides: React.FC = () => {
             </thead>
             <tbody>
               {filteredRides.map(ride => (
-                <tr key={ride.id} className="ride-row" onClick={() => setSelectedRide(ride)}>
-                  <td><TypeBadge type={getRideType(ride)} /></td>
+                <tr key={`${ride.source}:${ride.id}`} className="ride-row" onClick={() => setSelectedRide(ride)}>
                   <td>
-                    {classifyRide(ride).variant
-                      ? <VariantChip variant={classifyRide(ride).variant} />
+                    <div className="ride-type-cell">
+                      <TypeBadge type={getRideType(ride)} />
+                      {isCityToCity(ride) && <PostedByTag ride={ride} />}
+                    </div>
+                  </td>
+                  <td>
+                    {classify(ride).variant
+                      ? <VariantChip variant={classify(ride).variant} />
                       : <span className="cell-dim">—</span>}
                   </td>
-                  <td><StatusPill status={ride.status || 'unknown'} /></td>
+                  <td><StatusPill status={rideStatus(ride)} /></td>
                   <td>
                     <div className="route-cell">
                       <span className="route-pickup">
@@ -794,7 +1005,7 @@ export const Rides: React.FC = () => {
                       </span>
                     </div>
                   </td>
-                  <td className="cell-fare">{ride.price != null ? formatPKR(Number(ride.price)) : '—'}</td>
+                  <td className="cell-fare">{fareText(ride)}</td>
                   <td className="cell-dim">{ride.distance ?? '—'}</td>
                   <td className="cell-dim">{formatTime(ride)}</td>
                   <td><ChevronRight size={16} style={{ color: 'var(--text-secondary)' }} /></td>

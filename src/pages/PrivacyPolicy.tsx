@@ -11,7 +11,7 @@ interface PolicySection {
   id: string;
   title: string;
   category: 'location' | 'collection' | 'sharing' | 'rights' | 'security' | 'general';
-  audience: 'all' | 'rider' | 'driver' | 'critical';
+  audience: 'all' | 'passenger' | 'driver' | 'critical';
   icon: React.ReactNode;
   content: React.ReactNode;
 }
@@ -35,25 +35,25 @@ export const PrivacyPolicy: React.FC = () => {
       content: (
         <>
           <p>
-            As a mobile transportation platform connecting Drivers and Riders in real-time, <strong>Dridez</strong> requires explicit access to device GPS and location telemetry. This disclosure explains precisely how, when, and why location data is harvested across our applications in full compliance with Google Play Data Safety and Apple App Store guidelines.
+            As a mobile transportation platform connecting Drivers and Passengers in real-time, <strong>Dridez</strong> requires explicit access to device GPS and location telemetry. This disclosure explains precisely how, when, and why location data is harvested across our applications in full compliance with Google Play Data Safety and Apple App Store guidelines.
           </p>
           <div className="info-box info-box-warning">
             <h4 style={{ margin: '0 0 0.5rem 0', color: '#92400e', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <AlertTriangle size={20} /> Driver Location While Online
             </h4>
             <p style={{ margin: 0 }}>
-              Drivers are set to <strong>&ldquo;Online&rdquo;</strong> automatically when they open the driver side of the Dridez app, and can switch to <strong>&ldquo;Offline&rdquo;</strong> at any time. While a Driver is online and the app is open on screen, it shares their location about every 30 seconds so nearby ride requests can be matched to them. During an accepted trip, the Driver&rsquo;s location is also shared with that trip&rsquo;s Rider so they can follow the car.
+              Drivers are set to <strong>&ldquo;Online&rdquo;</strong> automatically when they open the driver side of the Dridez app, and can switch to <strong>&ldquo;Offline&rdquo;</strong> at any time. While a Driver is online and the app is open on screen, it shares their location about every 30 seconds so nearby ride requests can be matched to them. During an accepted trip, the Driver&rsquo;s location is also shared with that trip&rsquo;s Passenger so they can follow the car.
               <br /><br />
               <strong>Dridez does not collect location in the background.</strong> When the app is minimised, the screen is locked or the app is closed, no new location is collected. The last location shared is kept for up to 30 minutes so the Driver can still receive nearby requests as notifications, after which they are treated as offline. Switching to Offline or signing out removes it straight away.
             </p>
           </div>
-          <h4>Rider Foreground Location Tracking</h4>
+          <h4>Passenger Foreground Location Tracking</h4>
           <p>
-            For Riders, Dridez collects GPS location data only when the app is running in the foreground (open and active on screen) during ride request formation, pick-up coordination, and active transit. We do not track Rider location in the background once the trip concludes or the application is closed.
+            For Passengers, Dridez collects GPS location data only when the app is running in the foreground (open and active on screen) during ride request formation, pick-up coordination, and active transit. We do not track Passenger location in the background once the trip concludes or the application is closed.
           </p>
           <h4>How to Revoke Location Access</h4>
           <p>
-            Both Drivers and Riders can restrict location permissions at any time via their device system settings (e.g., <code>Settings &gt; Privacy &gt; Location Services &gt; Dridez</code>). Please note that revoking GPS access will render core functions—such as booking rides, accepting dispatch requests, and automatic fare computation—inoperable.
+            Both Drivers and Passengers can restrict location permissions at any time via their device system settings (e.g., <code>Settings &gt; Privacy &gt; Location Services &gt; Dridez</code>). Please note that revoking GPS access will render core functions—such as booking rides, accepting dispatch requests, and automatic fare computation—inoperable.
           </p>
         </>
       ),
@@ -73,7 +73,7 @@ export const PrivacyPolicy: React.FC = () => {
           <ul>
             <li><strong>Account Profile &amp; Registration:</strong> Full name, verified mobile phone number, email address, physical address, profile photographs, and password credentials.</li>
             <li><strong>Financial &amp; Billing Records:</strong> Credit/debit card tokens, mobile wallet identifiers, and payout bank account details (collected and processed via certified PCI-DSS compliant third-party payment gateways).</li>
-            <li><strong>Communication Logs:</strong> Customer support tickets, in-app messaging transcripts between Driver and Rider, emergency incident reports, and feedback ratings.</li>
+            <li><strong>Communication Logs:</strong> Customer support tickets, in-app messaging transcripts between Driver and Passenger, emergency incident reports, and feedback ratings.</li>
           </ul>
           <div className="info-box info-box-blue">
             <h4 style={{ margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#1e3a8a' }}>
@@ -105,7 +105,7 @@ export const PrivacyPolicy: React.FC = () => {
           </p>
           <h4>Core Service Fulfillment</h4>
           <ul>
-            <li><strong>Ride Pairing &amp; Dispatch:</strong> Utilizing location matrices to match waiting Riders with optimal, nearby available Drivers in real-time.</li>
+            <li><strong>Ride Pairing &amp; Dispatch:</strong> Utilizing location matrices to match waiting Passengers with optimal, nearby available Drivers in real-time.</li>
             <li><strong>Fare Computation &amp; Financial Clearing:</strong> Generating dynamic upfront pricing, processing card billing, computing driver commissions, executing rapid electronic bank deposits, and generating downloadable PDF tax invoices.</li>
             <li><strong>Navigation &amp; Mapping Integration:</strong> Translating origin and destination input into optimized TURN-by-TURN GPS guidance powered by Google Maps Platform APIs.</li>
           </ul>
@@ -129,13 +129,13 @@ export const PrivacyPolicy: React.FC = () => {
           <p>
             Dridez operates on a principles of strict necessity. We <strong>never sell, rent, or lease your personal identification information to data brokers or third-party marketing networks</strong>. Data sharing only occurs under the operational workflows detailed below.
           </p>
-          <h4>A. Real-Time Sharing Between Riders and Drivers</h4>
+          <h4>A. Real-Time Sharing Between Passengers and Drivers</h4>
           <p>
             When a ride agreement is formed, crucial identifying data is shared to facilitate seamless meeting and safety verification:
           </p>
           <ul>
-            <li><strong>Shared with Driver:</strong> Rider&rsquo;s first name, overall community star rating, specified pick-up geographical waypoint, destination landmark, and encrypted in-app communication channels (we use telephone number masking so personal phone numbers remain confidential).</li>
-            <li><strong>Shared with Rider:</strong> Driver&rsquo;s full name, portrait photo, verified community star rating, vehicle make/model/color, official license plate registration number, current geographical coordinates on a moving map, and estimated time of arrival (ETA).</li>
+            <li><strong>Shared with Driver:</strong> Passenger&rsquo;s first name, overall community star rating, specified pick-up geographical waypoint, destination landmark, and encrypted in-app communication channels (we use telephone number masking so personal phone numbers remain confidential).</li>
+            <li><strong>Shared with Passenger:</strong> Driver&rsquo;s full name, portrait photo, verified community star rating, vehicle make/model/color, official license plate registration number, current geographical coordinates on a moving map, and estimated time of arrival (ETA).</li>
           </ul>
           <h4>B. Trusted Infrastructure Providers &amp; Vendors</h4>
           <p>
@@ -167,14 +167,14 @@ export const PrivacyPolicy: React.FC = () => {
           </p>
           <h4>Your Mandatory Right to Account Deletion</h4>
           <p>
-            In alignment with Google Play Store &ldquo;Data Safety&rdquo; and Apple Privacy standards, both Drivers and Riders possess the unconditional right to request full account erasure and permanent personal data removal directly from our systems.
+            In alignment with Google Play Store &ldquo;Data Safety&rdquo; and Apple Privacy standards, both Drivers and Passengers possess the unconditional right to request full account erasure and permanent personal data removal directly from our systems.
           </p>
           <div className="delete-steps">
             <div className="delete-step-card">
               <div className="step-number">1</div>
               <div className="step-text">
                 <h5>Open App Account Settings</h5>
-                <p>Launch the Dridez Rider or Dridez Driver application on your mobile smartphone and tap your profile avatar in the upper right corner.</p>
+                <p>Launch the Dridez Passenger or Dridez Driver application on your mobile smartphone and tap your profile avatar in the upper right corner.</p>
               </div>
             </div>
             <div className="delete-step-card">
@@ -298,15 +298,15 @@ export const PrivacyPolicy: React.FC = () => {
 
   const getAudienceBadge = (audience: string) => {
     switch (audience) {
-      case 'rider':
-        return <span className="audience-badge badge-rider"><User size={12} /> Riders Only</span>;
+      case 'passenger':
+        return <span className="audience-badge badge-rider"><User size={12} /> Passengers Only</span>;
       case 'driver':
         return <span className="audience-badge badge-driver"><Car size={12} /> Drivers Only</span>;
       case 'critical':
         return <span className="audience-badge badge-critical"><AlertTriangle size={12} /> Mandatory Disclosure</span>;
       case 'all':
       default:
-        return <span className="audience-badge badge-all"><CheckCircle2 size={12} /> Riders &amp; Drivers</span>;
+        return <span className="audience-badge badge-all"><CheckCircle2 size={12} /> Passengers &amp; Drivers</span>;
     }
   };
 
@@ -345,7 +345,7 @@ export const PrivacyPolicy: React.FC = () => {
           </div>
           <h1 className="privacy-title">Privacy Policy &amp; Data Transparency</h1>
           <p className="privacy-subtitle">
-            We built <strong>Dridez</strong> to connect Drivers and Riders with seamless transparency. Learn precisely how we safeguard your personal information, handle location telemetrics, and honor your absolute right to data autonomy.
+            We built <strong>Dridez</strong> to connect Drivers and Passengers with seamless transparency. Learn precisely how we safeguard your personal information, handle location telemetrics, and honor your absolute right to data autonomy.
           </p>
 
           <div className="privacy-meta">
@@ -353,7 +353,7 @@ export const PrivacyPolicy: React.FC = () => {
               <span>Effective Date:</span> <strong>November 5, 2026</strong>
             </div>
             <div className="privacy-meta-item">
-              <span>Applies To:</span> <strong>Dridez Driver &amp; Rider Apps</strong>
+              <span>Applies To:</span> <strong>Dridez Driver &amp; Passenger Apps</strong>
             </div>
             <div className="privacy-meta-item">
               <span>Compliance:</span> <strong>Play Store / iOS Data Safety</strong>
@@ -389,7 +389,7 @@ export const PrivacyPolicy: React.FC = () => {
             </div>
             <div>
               <div className="highlight-title">One-Click Deletion</div>
-              <p className="highlight-desc">Drivers and Riders can trigger instant account erasure directly inside app profile privacy settings.</p>
+              <p className="highlight-desc">Drivers and Passengers can trigger instant account erasure directly inside app profile privacy settings.</p>
             </div>
           </div>
 
@@ -521,10 +521,10 @@ export const PrivacyPolicy: React.FC = () => {
         <div className="privacy-footer-links">
           <Link to="/" className="privacy-footer-link">Admin Portal</Link>
           <a href="mailto:support@dridez.com" className="privacy-footer-link">Driver Support</a>
-          <a href="mailto:support@dridez.com" className="privacy-footer-link">Rider Help Center</a>
+          <a href="mailto:support@dridez.com" className="privacy-footer-link">Passenger Help Center</a>
           <a href="mailto:privacy@dridez.com" className="privacy-footer-link">DPO Inquiries</a>
         </div>
-        <p>&copy; {new Date().getFullYear()} Dridez Technologies Ltd. All rights reserved. Designed for Driver &amp; Rider Trust.</p>
+        <p>&copy; {new Date().getFullYear()} Dridez Technologies Ltd. All rights reserved. Designed for Driver &amp; Passenger Trust.</p>
       </footer>
     </div>
   );

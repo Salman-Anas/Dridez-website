@@ -15,7 +15,7 @@ export interface SheetSpec {
   widths?: number[];
 }
 
-export type ExportKind = 'driver' | 'rider' | 'commission';
+export type ExportKind = 'driver' | 'passenger' | 'commission';
 
 const slug = (s: string): string =>
   s.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'all';

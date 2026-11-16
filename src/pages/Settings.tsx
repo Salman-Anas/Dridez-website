@@ -183,7 +183,7 @@ const CabtypeRateCard: React.FC<CabtypeCardProps> = ({
                 <span className="rate-value-unit">
                   {resolved.value !== null
                     ? `/ km · ${EXAMPLE_KM} km ≈ ${formatPKR(quotedFare(resolved.value, EXAMPLE_KM, baseFare), { decimals: 2 })}`
-                    : 'riders cannot book this type'}
+                    : 'passengers cannot book this type'}
                 </span>
               </div>
               <button className="rate-edit-btn" onClick={onEdit} title={`Set the ${meta.key} rate`}>
@@ -197,7 +197,7 @@ const CabtypeRateCard: React.FC<CabtypeCardProps> = ({
                 <AlertTriangle size={13} />
                 <span>
                   Nothing set anywhere in <span className="mono">{RATE_FALLBACK_CHAIN[meta.key].join(' → ')}</span> —
-                  the app shows no fare and the rider cannot book this type.
+                  the app shows no fare and the passenger cannot book this type.
                 </span>
               </div>
             ) : resolved.fromFallback ? (
@@ -242,7 +242,7 @@ const CabtypeRateCard: React.FC<CabtypeCardProps> = ({
                     ? 'every trip is charged per km'
                     : minimumUpToKm > 0
                       ? `trips up to ~${minimumUpToKm.toFixed(1)} km are charged this`
-                      : 'the least a rider is charged for this type'}
+                      : 'the least a passenger is charged for this type'}
                 </span>
               </div>
               <button className="rate-edit-btn" onClick={onBaseEdit} title={`Set the ${baseKey} minimum fare`}>
@@ -453,7 +453,7 @@ export const Settings: React.FC = () => {
                 <strong>{broken.length} ride {broken.length === 1 ? 'type has' : 'types have'} no
                   usable rate</strong>
                 <p>
-                  {broken.map(b => b.label).join(', ')} — the app shows no fare and riders cannot
+                  {broken.map(b => b.label).join(', ')} — the app shows no fare and passengers cannot
                   book {broken.length === 1 ? 'it' : 'them'}.
                 </p>
               </div>
@@ -521,7 +521,7 @@ export const Settings: React.FC = () => {
             <div className="snb-icon"><AlertCircle size={22} /></div>
             <div className="snb-text">
               <strong>How the app prices a ride:</strong> fare = <strong>rate × distance in km + {FARE_BASE}</strong>,
-              raised to the type's <strong>base fare</strong> if it comes out lower — riders also cannot offer
+              raised to the type's <strong>base fare</strong> if it comes out lower — passengers also cannot offer
               a custom fare below it. Base fares have no fallbacks; <strong>0</strong> or unset means no minimum.
               When a ride type's own per-km key is unset the app walks a fallback chain and takes the first
               key with a value above zero — the card shows which key each price is actually coming

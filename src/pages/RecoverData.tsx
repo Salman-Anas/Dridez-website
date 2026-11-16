@@ -361,7 +361,7 @@ export const RecoverData: React.FC = () => {
               <div className="step-content">
                 <h3>Identity Verification</h3>
                 <p>
-                  Submit the email address associated with your Rider or Driver profile. Our security protocol checks credentials against encrypted database records to verify lawful account ownership.
+                  Submit the email address associated with your Passenger or Driver profile. Our security protocol checks credentials against encrypted database records to verify lawful account ownership.
                 </p>
               </div>
             </div>

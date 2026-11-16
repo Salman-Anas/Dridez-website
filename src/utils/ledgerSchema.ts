@@ -594,7 +594,7 @@ export const riderSpendingSheets = (args: {
       columns: ['Item', 'Value'],
       widths: [22, 28],
       rows: [
-        ['Rider', args.name],
+        ['Passenger', args.name],
         ['Phone', args.phone],
         ['Period', args.periodLabel],
         ['Generated', new Date()],

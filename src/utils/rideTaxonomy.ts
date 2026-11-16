@@ -135,8 +135,8 @@ export interface RideVariantFilter {
 }
 
 export const RIDE_VARIANT_FILTERS: RideVariantFilter[] = [
-  { id: 'ac',       label: 'AC',       hint: 'the rider asked for air conditioning', vehicles: ['mini', 'comfort', 'other'] },
-  { id: 'nonac',    label: 'Non AC',   hint: 'the rider declined air conditioning',  vehicles: ['mini', 'comfort', 'other'] },
+  { id: 'ac',       label: 'AC',       hint: 'the passenger asked for air conditioning', vehicles: ['mini', 'comfort', 'other'] },
+  { id: 'nonac',    label: 'Non AC',   hint: 'the passenger declined air conditioning',  vehicles: ['mini', 'comfort', 'other'] },
   { id: 'delivery', label: 'Delivery', hint: 'a package, not a passenger',           vehicles: ['car', 'bike', 'intercity'] },
 ];
 
@@ -347,7 +347,7 @@ export const LEGACY_RATE_KEYS: LegacyRateKeyMeta[] = [
   { key: 'deliver',        reason: 'Old delivery rate. Still the fallback for car_delivery and bike_delivery.' },
   { key: 'delivery',       reason: 'Alternate spelling of the old delivery rate. Last fallback for car_delivery.' },
   { key: 'freight',        reason: 'Freight was removed from the app — nothing reads this key any more.' },
-  { key: 'city-to-city',   reason: 'Unused: city-to-city fares are set by the rider, not from a per-km rate.' },
+  { key: 'city-to-city',   reason: 'Unused: city-to-city fares are set by the passenger, not from a per-km rate.' },
   { key: 'commission',     reason: 'Older spelling of the in-city commission. The canonical key is comission, with one "m".' },
   { key: 'commissionRate', reason: 'Older spelling of the in-city commission. The canonical key is comission, with one "m".' },
   { key: 'ctcCommission',  reason: 'Older spelling of the city-to-city commission. The canonical key is ctc_commission.' },

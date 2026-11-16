@@ -16,7 +16,7 @@ import {
 } from '../utils/supportChatSchema';
 
 // ─── Support chat ─────────────────────────────────────────────────────────────
-// Live conversations with riders and drivers. Users write from "Chat with
+// Live conversations with passengers and drivers. Users write from "Chat with
 // Dridez" in the app; the team answers here and can start a conversation with
 // any account ("New message", or "Message" on a user in the Users page, which
 // links here as /support-chat?uid=…). Contract: dridez/schema.md §3.17.
@@ -272,7 +272,7 @@ export const SupportChat: React.FC = () => {
         <div>
           <h1>Support Chat</h1>
           <p>
-            Live conversations with riders and drivers. Your replies reach the user’s phone as a
+            Live conversations with passengers and drivers. Your replies reach the user’s phone as a
             notification.{unreadTotal > 0 && <> <strong>{unreadTotal} unread.</strong></>}
           </p>
         </div>

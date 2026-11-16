@@ -59,7 +59,7 @@ export const Login: React.FC = () => {
             <Shield size={34} />
           </div>
           <h1 className="login-title">Dridez Command Portal</h1>
-          <p className="login-subtitle">Enterprise Driver &amp; Rider Management Network</p>
+          <p className="login-subtitle">Driver &amp; Passenger Management</p>
         </header>
 
         {error && (
@@ -131,7 +131,7 @@ export const Login: React.FC = () => {
             <span>
               <strong>Firebase Auth:</strong> sign in with a Firebase account that carries the{' '}
               <span className="mono">admin</span> claim. The database rules refuse every read and
-              write from any other account, so an ordinary rider or driver login will not open the
+              write from any other account, so an ordinary passenger or driver login will not open the
               portal.
             </span>
           </div>

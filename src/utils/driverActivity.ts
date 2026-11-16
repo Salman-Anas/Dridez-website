@@ -48,7 +48,7 @@ export const LIVE_RIDE_STATUS_LABEL: Record<string, string> = {
   inprogress: 'Heading to pickup',
   in_progress: 'Heading to pickup',
   arrived: 'Waiting at pickup',
-  started: 'Rider on board',
+  started: 'Passenger on board',
   ontrip: 'City-to-city trip under way',
 };
 

@@ -358,8 +358,8 @@ const CustomerSpendModal: React.FC<{
           <div className="modal-section">
             <h3 className="modal-section-title"><Wallet size={16} /> Why there is no wallet balance</h3>
             <p className="modal-no-data">
-              Riders do not hold a balance in Dridez. A rider pays the fare to the driver in cash at
-              the end of the trip, and no rider wallet exists in the database — the only wallets are
+              Passengers do not hold a balance in Dridez. A passenger pays the fare to the driver in cash at
+              the end of the trip, and no passenger wallet exists in the database — the only wallets are
               the drivers&rsquo; prepaid balances that commission is taken from, shown on the Driver
               Accounts page. What a customer is worth is therefore what they have paid, which is
               what this list ranks.
@@ -571,7 +571,7 @@ export const Payments: React.FC = () => {
     {
       key: 'customer-spend' as CategoryFilter,
       label: 'Customer Spend',
-      sublabel: 'Fares paid by riders, in cash',
+      sublabel: 'Fares paid by passengers, in cash',
       amount: totalCustomerSpend,
       count: payingCustomers,
       color: '#4f46e5',
@@ -770,7 +770,7 @@ export const Payments: React.FC = () => {
             <div className="pay-bq-stat"><span className="pay-bq-val">{customerSpend.reduce((n, c) => n + c.rides, 0)}</span><span className="pay-bq-lbl">Rides Paid For</span></div>
           </div>
           <p className="pay-balance-note">
-            Riders hold no wallet balance — the fare is paid to the driver in cash, so this is what
+            Passengers hold no wallet balance — the fare is paid to the driver in cash, so this is what
             customers have actually paid over the selected period. Driver prepaid balances are on
             the Driver Accounts page.
           </p>

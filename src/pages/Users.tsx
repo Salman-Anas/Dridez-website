@@ -314,8 +314,24 @@ const UserHistoryDrawer: React.FC<{
   const cancelledCount = rides.filter(r => isCancelled(r.status)).length;
 
   const hasApplied = Boolean(user.verificationSubmitted);
+  // What the app normally collects before verification. An admin can verify
+  // without it (some iPhone users never send it), but sees what's missing.
+  const missingDetails = [
+    !(user.cnic || '').trim() && 'CNIC',
+    !(user.address || '').trim() && 'address',
+    !(user.phone || '').trim() && 'phone number',
+  ].filter(Boolean) as string[];
+  const missingText = new Intl.ListFormat('en', { type: 'conjunction' }).format(missingDetails);
 
   const act = async (status: Verification) => {
+    if (status === 'verified' && missingDetails.length) {
+      const who = user.name || 'This user';
+      const ok = window.confirm(
+        `${who} hasn't sent their ${missingText}. Verify the account anyway? ` +
+        'They will be able to book straight away.',
+      );
+      if (!ok) return;
+    }
     setWorking(status);
     await onSetStatus(user.id, status);
     setWorking(null);
@@ -371,8 +387,10 @@ const UserHistoryDrawer: React.FC<{
                 full
               />
             </div>
-            {!hasApplied && (
-              <p className="verify-hint"><Info size={12} /> This user has not applied for verification yet — CNIC, address &amp; phone are still missing.</p>
+            {missingDetails.length > 0 && (
+              <p className="verify-hint">
+                <Info size={12} /> No {missingText} yet. You can still verify this account below.
+              </p>
             )}
           </div>
 
@@ -478,7 +496,7 @@ const UserHistoryDrawer: React.FC<{
 
           {/* ── Spending, across in-city, city-to-city and seat bookings ── */}
           <div className="modal-section">
-            <h3 className="modal-section-title"><DollarSign size={16} /> Rider spending</h3>
+            <h3 className="modal-section-title"><DollarSign size={16} /> Passenger spending</h3>
             <RiderSpending uid={uid} name={user.name || ''} phone={user.phone || ''} />
           </div>
 
@@ -609,14 +627,14 @@ const UserHistoryDrawer: React.FC<{
                   ? <><Loader size={16} className="spin" /> Revoking…</>
                   : <><RotateCcw size={16} /> Revoke Verification</>}
               </button>
-            ) : hasApplied ? (
+            ) : (
               <>
                 <button className="dv-verify-btn" onClick={() => act('verified')} disabled={working !== null}>
                   {working === 'verified'
                     ? <><Loader size={16} className="spin" /> Verifying…</>
-                    : <><ShieldCheck size={16} /> Approve &amp; Verify User</>}
+                    : <><ShieldCheck size={16} /> {missingDetails.length ? 'Verify without details' : 'Approve & verify user'}</>}
                 </button>
-                {verification !== 'rejected' && (
+                {hasApplied && verification !== 'rejected' && (
                   <button className="dv-reject-btn" onClick={() => act('rejected')} disabled={working !== null}>
                     {working === 'rejected'
                       ? <><Loader size={16} className="spin" /> Rejecting…</>
@@ -624,10 +642,6 @@ const UserHistoryDrawer: React.FC<{
                   </button>
                 )}
               </>
-            ) : (
-              <p className="verify-hint" style={{ justifyContent: 'center' }}>
-                <Info size={12} /> This user hasn&apos;t applied for verification yet — nothing to approve.
-              </p>
             )}
           </div>
         </div>
@@ -638,7 +652,9 @@ const UserHistoryDrawer: React.FC<{
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type Filter = 'all' | 'android' | 'ios' | 'verified' | 'pending' | 'unverified' | 'suspended';
+/** Two independent filters, so "iOS" and "Verified" can be combined. */
+type DeviceFilter = 'all' | 'android' | 'ios';
+type StatusFilter = 'all' | 'verified' | 'pending' | 'unverified' | 'suspended';
 
 /** Who the composer can reach from this page: every account that wasn't deleted. */
 const toRecipients = (users: UserProfile[]): Recipient[] => users
@@ -650,9 +666,20 @@ const toRecipients = (users: UserProfile[]): Recipient[] => users
     verified: getVerification(u) === 'verified',
   }));
 
-const FILTER_LABEL: Record<Filter, string> = {
-  all: 'All', android: 'Android', ios: 'iOS', verified: 'Verified', pending: 'Pending', unverified: 'Unverified',
-  suspended: 'Suspended',
+const DEVICE_LABEL: Record<DeviceFilter, string> = { all: 'All devices', android: 'Android', ios: 'iOS' };
+const STATUS_LABEL: Record<StatusFilter, string> = {
+  all: 'Any status', verified: 'Verified', pending: 'Pending', unverified: 'Not verified', suspended: 'Suspended',
+};
+
+const matchesDevice = (u: UserProfile, f: DeviceFilter) => f === 'all' || getPlatform(u) === f;
+const matchesStatus = (u: UserProfile, f: StatusFilter) => {
+  switch (f) {
+    case 'all': return true;
+    case 'verified': return getVerification(u) === 'verified';
+    case 'pending': return getVerification(u) === 'pending';
+    case 'unverified': return getVerification(u) !== 'verified';
+    default: return u.suspended === true && !isDeletedAccount(u);
+  }
 };
 
 export const Users: React.FC = () => {
@@ -665,12 +692,22 @@ export const Users: React.FC = () => {
   // null: closed; [] : opened from the header; [uid]: opened from a user's drawer.
   const [notifyFor, setNotifyFor] = useState<{ uids: string[]; kind: ContactKind } | null>(null);
   const [editing, setEditing] = useState<UserProfile | null>(null);
-  // Dashboard stat cards deep-link here as /users?filter=android etc.
+  // Kept in the URL (/users?device=ios&status=verified), so the dashboard's
+  // cards can link straight to a filtered list. Older ?filter= links still work.
   const [searchParams, setSearchParams] = useSearchParams();
-  const paramFilter = searchParams.get('filter') as Filter | null;
-  const filter: Filter = paramFilter && paramFilter in FILTER_LABEL ? paramFilter : 'all';
-  const setFilter = (f: Filter) =>
-    setSearchParams(f === 'all' ? {} : { filter: f }, { replace: true });
+  const legacy = searchParams.get('filter') ?? '';
+  const deviceParam = searchParams.get('device') ?? (legacy in DEVICE_LABEL ? legacy : '');
+  const statusParam = searchParams.get('status') ?? (legacy in STATUS_LABEL ? legacy : '');
+  const device: DeviceFilter = deviceParam in DEVICE_LABEL ? deviceParam as DeviceFilter : 'all';
+  const status: StatusFilter = statusParam in STATUS_LABEL ? statusParam as StatusFilter : 'all';
+  const setFilters = (next: { device?: DeviceFilter; status?: StatusFilter }) => {
+    const d = next.device ?? device;
+    const st = next.status ?? status;
+    setSearchParams({
+      ...(d !== 'all' ? { device: d } : {}),
+      ...(st !== 'all' ? { status: st } : {}),
+    }, { replace: true });
+  };
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -722,15 +759,11 @@ export const Users: React.FC = () => {
     }
   };
 
-  const counts = {
-    all: users.length,
-    android: users.filter(u => getPlatform(u) === 'android').length,
-    ios: users.filter(u => getPlatform(u) === 'ios').length,
-    verified: users.filter(u => getVerification(u) === 'verified').length,
-    pending: users.filter(u => getVerification(u) === 'pending').length,
-    unverified: users.filter(u => getVerification(u) !== 'verified').length,
-    suspended: users.filter(u => u.suspended === true && !isDeletedAccount(u)).length,
-  };
+  // Each row counts what choosing it would show, given the other row's choice.
+  const deviceCounts = Object.fromEntries((Object.keys(DEVICE_LABEL) as DeviceFilter[]).map(d =>
+    [d, users.filter(u => matchesDevice(u, d) && matchesStatus(u, status)).length])) as Record<DeviceFilter, number>;
+  const statusCounts = Object.fromEntries((Object.keys(STATUS_LABEL) as StatusFilter[]).map(st =>
+    [st, users.filter(u => matchesDevice(u, device) && matchesStatus(u, st)).length])) as Record<StatusFilter, number>;
 
   const filtered = users.filter(u => {
     const q = search.toLowerCase().trim();
@@ -740,15 +773,7 @@ export const Users: React.FC = () => {
       || (u.email || '').toLowerCase().includes(q)
       || (u.cnic || '').includes(q)
       || (u.uid || u.id).toLowerCase().includes(q);
-    const matchFilter =
-      filter === 'all' ? true :
-      filter === 'android' ? getPlatform(u) === 'android' :
-      filter === 'ios' ? getPlatform(u) === 'ios' :
-      filter === 'verified' ? getVerification(u) === 'verified' :
-      filter === 'pending' ? getVerification(u) === 'pending' :
-      filter === 'suspended' ? u.suspended === true && !isDeletedAccount(u) :
-      getVerification(u) !== 'verified';
-    return matchSearch && matchFilter;
+    return matchSearch && matchesDevice(u, device) && matchesStatus(u, status);
   });
 
   return (
@@ -768,18 +793,36 @@ export const Users: React.FC = () => {
         </div>
       </div>
 
-      {/* Filter pills */}
-      <div className="dv-filter-row">
-        {(Object.keys(FILTER_LABEL) as Filter[]).map(f => (
-          <button
-            key={f}
-            className={`dv-filter-pill ${filter === f ? 'active' : ''}`}
-            onClick={() => setFilter(f)}
-          >
-            {FILTER_LABEL[f]}
-            <span className="dv-pill-count">{counts[f]}</span>
-          </button>
-        ))}
+      {/* Filters: device and status combine, e.g. iOS + Not verified */}
+      <div className="ride-filter-block">
+        <div className="ride-filter-label"><Smartphone size={14} /> Device</div>
+        <div className="dv-filter-row">
+          {(Object.keys(DEVICE_LABEL) as DeviceFilter[]).map(d => (
+            <button
+              key={d}
+              className={`dv-filter-pill ${device === d ? 'active' : ''}`}
+              onClick={() => setFilters({ device: d })}
+            >
+              {DEVICE_LABEL[d]}
+              <span className="dv-pill-count">{deviceCounts[d]}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="ride-filter-block">
+        <div className="ride-filter-label"><Shield size={14} /> Status</div>
+        <div className="dv-filter-row">
+          {(Object.keys(STATUS_LABEL) as StatusFilter[]).map(st => (
+            <button
+              key={st}
+              className={`dv-filter-pill ${status === st ? 'active' : ''}`}
+              onClick={() => setFilters({ status: st })}
+            >
+              {STATUS_LABEL[st]}
+              <span className="dv-pill-count">{statusCounts[st]}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Search */}

@@ -251,7 +251,7 @@ export const RiderSpending: React.FC<{ uid: string; name: string; phone: string 
       <PeriodPicker state={state} onChange={setState}>
         <ExportButton
           disabled={!all || !totals}
-          fileName={() => exportFileName('rider', name || uid)}
+          fileName={() => exportFileName('passenger', name || uid)}
           sheets={() => riderSpendingSheets({ name, phone, periodLabel: label, totals: totals!, trips })}
         />
       </PeriodPicker>
