@@ -447,6 +447,21 @@ Present in the database (fields `title`, `description`, `status`, `score`,
 `history`, …). The mobile app never reads or writes it; presumably the
 portal's own. Leave as is.
 
+### 3.15 `TestRates/{autoId}` — fare experiments (portal only, not used by the app)
+
+One document per region, written by the portal's **Graphs** page. Nothing
+here affects real fares; `rates/rates` (§3.4) is still what the app charges.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | Region name |
+| `points` | array of `{ id, distance, rate, label? }` | Observed fares: `distance` in km, `rate` in PKR |
+| `curve` | `{ minFare, threshold, perKm, cuts }` | Candidate curve: `minFare` up to `threshold` km, then `perKm` for each km beyond it |
+| `curve.cuts` | array of `{ fromKm, perKm }`, ascending | From `fromKm` on, each further km costs this cut's `perKm`. The fare carries on from where the previous stretch ended, so it never jumps |
+| `createdAt`, `updatedAt` | Timestamp | `serverTimestamp()` |
+
+Covered by the admin-only catch-all rule; no rules change needed.
+
 ---
 
 ## 4. Realtime Database nodes

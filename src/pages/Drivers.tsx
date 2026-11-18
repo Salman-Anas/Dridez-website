@@ -11,8 +11,10 @@ import {
   getLicenceImg, getLicenceBackImg, getRegistrationImg, getCnicImg, getVehicleImages,
   getDocumentCount, getUid,
   getOwnership, getOwnerName, getOwnerCnic, formatCnic,
-  STATUS_LABEL, VEHICLE_TYPE_LABEL, OWNERSHIP_LABEL,
+  getLicenceExpiry, licenceExpiryRelative, getUpdateKind,
+  STATUS_LABEL, VEHICLE_TYPE_LABEL, OWNERSHIP_LABEL, UPDATE_KIND_LABEL,
   type DriverApplicationFields, type AppStatus, type VehicleType,
+  type LicenceExpiry, type UpdateKind,
 } from '../utils/driverSchema';
 import {
   useDriverActivity, LIVE_RIDE_STATUS_LABEL, timeAgo,
@@ -34,6 +36,7 @@ import {
   CreditCard, Calendar, FileText, Activity, MapPin, IdCard, UserCheck,
   Info, ArrowUpDown, Undo2, MessageSquareWarning, Radio, AlertTriangle, Snowflake,
   Wifi, KeyRound, Route, PauseCircle, Bell, MessagesSquare, UserPen,
+  RefreshCw, CalendarX,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -191,6 +194,41 @@ const AppStatusBadge: React.FC<{ status: AppStatus; small?: boolean }> = ({ stat
     <span className={`verify-badge vs-${status === 'approved' ? 'verified' : status}`}
           style={small ? { fontSize: '0.7rem' } : undefined}>
       {icon} {STATUS_LABEL[status]}
+    </span>
+  );
+};
+
+/**
+ * An approved driver resubmitted only their licence or only their vehicle, and
+ * is locked out of driver mode until it is approved again. Loud while that
+ * review is outstanding; muted once decided, as a record of the last change.
+ */
+const UpdateKindBadge: React.FC<{ kind: UpdateKind; pending: boolean; small?: boolean }> = ({ kind, pending, small }) => (
+  <span
+    className={`dv-update-badge${pending ? '' : ' dv-update-badge-muted'}${small ? ' dv-update-badge-sm' : ''}`}
+    title={pending
+      ? `Approved driver resubmitted only their ${kind === 'license' ? 'licence' : 'vehicle'} — can't take rides until approved again`
+      : `The last submission was a ${kind === 'license' ? 'licence' : 'vehicle'} update`}
+  >
+    <RefreshCw size={small ? 10 : 12} /> {UPDATE_KIND_LABEL[kind]}
+  </span>
+);
+
+const expiryFlagged = (e: LicenceExpiry) => e.state === 'expired' || e.state === 'soon';
+
+/** List-card chip; red when the licence has expired or expires within 30 days. */
+const LicenceExpiryChip: React.FC<{ expiry: LicenceExpiry }> = ({ expiry }) => {
+  if (expiry.state === 'missing') {
+    return <span className="dv-expiry-chip dv-expiry-missing"><IdCard size={11} /> Licence expiry not provided</span>;
+  }
+  if (expiry.state === 'invalid') {
+    return <span className="dv-expiry-chip dv-expiry-missing" title="Not a YYYY-MM-DD date"><IdCard size={11} /> Licence exp. {expiry.label}</span>;
+  }
+  return (
+    <span className={`dv-expiry-chip${expiryFlagged(expiry) ? ' dv-expiry-flag' : ''}`}
+          title={`Driving licence: ${licenceExpiryRelative(expiry)}`}>
+      {expiryFlagged(expiry) ? <CalendarX size={11} /> : <IdCard size={11} />}
+      {expiry.state === 'expired' ? 'Licence expired' : 'Licence exp.'} {expiry.label}
     </span>
   );
 };
@@ -358,6 +396,9 @@ const DriverDrawer: React.FC<{
   const cnicImg = getCnicImg(driver);
   const vehicleImages = getVehicleImages(driver);
   const hasDocs = getDocumentCount(driver) > 0;
+  const updateKind = getUpdateKind(driver);
+  const licenceExpiry = getLicenceExpiry(driver);
+  const changedTag = <span className="dv-changed-tag"><RefreshCw size={10} /> Changed</span>;
 
   useEffect(() => {
     // Load the account the application belongs to, so the reviewer can check
@@ -450,6 +491,7 @@ const DriverDrawer: React.FC<{
               <div className="dv-phone"><Phone size={12} /> {driver.phoneNumber || account?.phone || '—'}</div>
             </div>
             <AppStatusBadge status={status} />
+            {updateKind && <UpdateKindBadge kind={updateKind} pending={status === 'pending'} />}
             <LiveBadge presence={presence} liveRide={liveRide} />
             {account?.suspended && (
               <span
@@ -511,6 +553,22 @@ const DriverDrawer: React.FC<{
             </div>
           )}
 
+          {/* ── Re-verification: an approved driver changed one part ── */}
+          {updateKind && status === 'pending' && (
+            <div className="dv-update-callout">
+              <RefreshCw size={15} />
+              <div>
+                <strong>{updateKind === 'license' ? 'Licence update' : 'Vehicle change'} from an approved driver</strong>
+                <p>
+                  {updateKind === 'license'
+                    ? 'Only the driving licence (front, back and expiry date) was resubmitted. The vehicle is as previously approved.'
+                    : 'Only the vehicle (type, tier, details, photos, ownership and registration) was resubmitted. The licence is as previously approved.'}
+                  {' '}Driver mode is locked until you approve again.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* ── Linked account ── */}
           <div className="modal-section">
             <h3 className="modal-section-title"><UserCheck size={15} /> Account Holder</h3>
@@ -549,8 +607,8 @@ const DriverDrawer: React.FC<{
           </div>
 
           {/* ── Vehicle ── */}
-          <div className="modal-section">
-            <h3 className="modal-section-title"><Car size={15} /> Vehicle</h3>
+          <div className={`modal-section${updateKind === 'vehicle' ? ' dv-section-changed' : ''}`}>
+            <h3 className="modal-section-title"><Car size={15} /> Vehicle {updateKind === 'vehicle' && changedTag}</h3>
             <div className="modal-details-grid">
               <Detail icon={<VehicleIcon type={vehicleType} size={11} />} label="Vehicle Type"
                       value={VEHICLE_TYPE_LABEL[vehicleType]} />
@@ -598,83 +656,104 @@ const DriverDrawer: React.FC<{
               <p className="verify-hint"><Info size={12} /> No documents were uploaded with this application.</p>
             )}
 
-            <h4 className="dv-doc-group">Driving Licence</h4>
-            <div className="dv-photo-row">
-              <DocThumb src={licenceImg} label="Licence — Front" onOpen={setLightbox} />
-              <DocThumb src={licenceBackImg} label="Licence — Back" onOpen={setLightbox} />
-              {cnicImg && <DocThumb src={cnicImg} label="CNIC" onOpen={setLightbox} />}
-            </div>
-            {licenceImg && !licenceBackImg && (
-              <p className="verify-hint">
-                <Info size={12} /> Submitted before the licence back was asked for — the app requests
-                it the next time the driver edits their application.
-              </p>
-            )}
-            {(driver.driversLicense || driver.driversLicenseExpiration) && (
-              <div className="modal-details-grid" style={{ marginTop: '0.75rem' }}>
-                <Detail icon={<IdCard size={11} />} label="Licence No." value={driver.driversLicense} mono />
-                <Detail icon={<Calendar size={11} />} label="Licence Expiry" value={driver.driversLicenseExpiration} />
+            <div className={`dv-doc-block${updateKind === 'license' ? ' dv-changed' : ''}`}>
+              <h4 className="dv-doc-group">Driving Licence {updateKind === 'license' && changedTag}</h4>
+              <div className="dv-photo-row">
+                <DocThumb src={licenceImg} label="Licence — Front" onOpen={setLightbox} />
+                <DocThumb src={licenceBackImg} label="Licence — Back" onOpen={setLightbox} />
+                {cnicImg && <DocThumb src={cnicImg} label="CNIC" onOpen={setLightbox} />}
               </div>
-            )}
-
-            <h4 className="dv-doc-group"><Images size={12} /> Vehicle Photos ({vehicleImages.length})</h4>
-            <div className="dv-photo-row">
-              {vehicleImages.length === 0
-                ? <DocThumb label="Vehicle photo" onOpen={setLightbox} />
-                : vehicleImages.map((src, i) => (
-                    <DocThumb key={src} src={src} label={`Vehicle ${i + 1} of ${vehicleImages.length}`} onOpen={setLightbox} />
-                  ))}
-            </div>
-
-            <h4 className="dv-doc-group"><KeyRound size={12} /> Vehicle Ownership</h4>
-            {ownership === null ? (
-              <p className="verify-hint">
-                <Info size={12} /> Not answered — submitted before the ownership question existed. The
-                app asks for it the next time the driver edits their application.
-              </p>
-            ) : (
-              <div className={`dv-ownership dv-ownership-${ownership}`}>
-                <div className="dv-ownership-head">
-                  <span className="dv-ownership-tag">{OWNERSHIP_LABEL[ownership]}</span>
-                  {ownership === 'owner' && <span className="cell-dim">The applicant is the registered owner</span>}
+              <div className={`dv-expiry dv-expiry-${licenceExpiry.state}`}>
+                {expiryFlagged(licenceExpiry) ? <CalendarX size={14} /> : <Calendar size={14} />}
+                <span className="dv-expiry-label">Licence expiry</span>
+                <strong>{licenceExpiry.state === 'missing' ? 'Not provided' : licenceExpiry.label}</strong>
+                {licenceExpiry.days !== null && <span className="dv-expiry-rel">{licenceExpiryRelative(licenceExpiry)}</span>}
+              </div>
+              {licenceExpiry.state === 'missing' && (
+                <p className="verify-hint">
+                  <Info size={12} /> Submitted before the expiry date was asked for — the app asks for it on the
+                  driver's next edit or licence update.
+                </p>
+              )}
+              {licenceExpiry.state === 'invalid' && (
+                <p className="verify-hint dv-mismatch">
+                  <AlertTriangle size={12} /> The stored expiry isn't a YYYY-MM-DD date — check it against the licence photo.
+                </p>
+              )}
+              {licenceImg && !licenceBackImg && (
+                <p className="verify-hint">
+                  <Info size={12} /> Submitted before the licence back was asked for — the app requests
+                  it the next time the driver edits their application.
+                </p>
+              )}
+              {(driver.driversLicense || driver.driversLicenseExpiration) && (
+                <div className="modal-details-grid" style={{ marginTop: '0.75rem' }}>
+                  <Detail icon={<IdCard size={11} />} label="Licence No." value={driver.driversLicense} mono />
+                  <Detail icon={<Calendar size={11} />} label="Licence Expiry (old form)" value={driver.driversLicenseExpiration} />
                 </div>
-                {ownership === 'driver' && (
-                  <div className="modal-details-grid">
-                    <Detail icon={<UserCheck size={11} />} label="Owner Name (as on ID card)" value={ownerName} />
-                    <Detail icon={<CreditCard size={11} />} label="Owner CNIC" value={formatCnic(ownerCnic)} mono />
-                  </div>
-                )}
-                {ownership === 'driver' && (!ownerName || !ownerCnic) && (
-                  <p className="verify-hint dv-mismatch">
-                    <AlertTriangle size={12} /> The owner's {!ownerName && !ownerCnic ? 'name and CNIC are' : !ownerName ? 'name is' : 'CNIC is'} missing.
-                  </p>
-                )}
-                {ownerCnic && ownerCnic.length !== 13 && (
-                  <p className="verify-hint dv-mismatch">
-                    <AlertTriangle size={12} /> Owner CNIC has {ownerCnic.length} digits — a CNIC has 13.
-                  </p>
-                )}
-                {ownerIsApplicant && (
-                  <p className="verify-hint dv-mismatch">
-                    <AlertTriangle size={12} /> Owner CNIC is the applicant's own CNIC — they may own the vehicle after all.
-                  </p>
-                )}
-              </div>
-            )}
-
-            <h4 className="dv-doc-group">Registration / Ownership Proof</h4>
-            <div className="dv-photo-row">
-              <DocThumb src={registrationImg} label="Registration Proof" onOpen={setLightbox} />
+              )}
             </div>
-            {registrationImg && ownership !== null && (
-              <p className="verify-hint">
-                <Info size={12} />
-                <span>
-                  Should be in <strong>{registrationHolder}</strong>'s name
-                  {ownership === 'driver' && ownerCnic ? <> — CNIC <span className="mono">{formatCnic(ownerCnic)}</span></> : null}.
-                </span>
-              </p>
-            )}
+
+            <div className={`dv-doc-block${updateKind === 'vehicle' ? ' dv-changed' : ''}`}>
+              <h4 className="dv-doc-group"><Images size={12} /> Vehicle Photos ({vehicleImages.length}) {updateKind === 'vehicle' && changedTag}</h4>
+              <div className="dv-photo-row">
+                {vehicleImages.length === 0
+                  ? <DocThumb label="Vehicle photo" onOpen={setLightbox} />
+                  : vehicleImages.map((src, i) => (
+                      <DocThumb key={src} src={src} label={`Vehicle ${i + 1} of ${vehicleImages.length}`} onOpen={setLightbox} />
+                    ))}
+              </div>
+
+              <h4 className="dv-doc-group"><KeyRound size={12} /> Vehicle Ownership</h4>
+              {ownership === null ? (
+                <p className="verify-hint">
+                  <Info size={12} /> Not answered — submitted before the ownership question existed. The
+                  app asks for it the next time the driver edits their application.
+                </p>
+              ) : (
+                <div className={`dv-ownership dv-ownership-${ownership}`}>
+                  <div className="dv-ownership-head">
+                    <span className="dv-ownership-tag">{OWNERSHIP_LABEL[ownership]}</span>
+                    {ownership === 'owner' && <span className="cell-dim">The applicant is the registered owner</span>}
+                  </div>
+                  {ownership === 'driver' && (
+                    <div className="modal-details-grid">
+                      <Detail icon={<UserCheck size={11} />} label="Owner Name (as on ID card)" value={ownerName} />
+                      <Detail icon={<CreditCard size={11} />} label="Owner CNIC" value={formatCnic(ownerCnic)} mono />
+                    </div>
+                  )}
+                  {ownership === 'driver' && (!ownerName || !ownerCnic) && (
+                    <p className="verify-hint dv-mismatch">
+                      <AlertTriangle size={12} /> The owner's {!ownerName && !ownerCnic ? 'name and CNIC are' : !ownerName ? 'name is' : 'CNIC is'} missing.
+                    </p>
+                  )}
+                  {ownerCnic && ownerCnic.length !== 13 && (
+                    <p className="verify-hint dv-mismatch">
+                      <AlertTriangle size={12} /> Owner CNIC has {ownerCnic.length} digits — a CNIC has 13.
+                    </p>
+                  )}
+                  {ownerIsApplicant && (
+                    <p className="verify-hint dv-mismatch">
+                      <AlertTriangle size={12} /> Owner CNIC is the applicant's own CNIC — they may own the vehicle after all.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <h4 className="dv-doc-group">Registration / Ownership Proof</h4>
+              <div className="dv-photo-row">
+                <DocThumb src={registrationImg} label="Registration Proof" onOpen={setLightbox} />
+              </div>
+              {registrationImg && ownership !== null && (
+                <p className="verify-hint">
+                  <Info size={12} />
+                  <span>
+                    Should be in <strong>{registrationHolder}</strong>'s name
+                    {ownership === 'driver' && ownerCnic ? <> — CNIC <span className="mono">{formatCnic(ownerCnic)}</span></> : null}.
+                  </span>
+                </p>
+              )}
+            </div>
           </div>
 
           {/* ── Application details ── */}
@@ -687,6 +766,11 @@ const DriverDrawer: React.FC<{
               <Detail icon={<CreditCard size={11} />} label="CNIC" value={driver.cnicNum} mono />
               {driver.cnicExp && <Detail icon={<Calendar size={11} />} label="CNIC Expiry" value={driver.cnicExp} />}
               <Detail icon={<Clock size={11} />} label="Submitted" value={driver.submittedAt ? fmtTime(driver.submittedAt) : undefined} />
+              <Detail icon={<RefreshCw size={11} />} label="Submission" value={
+                updateKind === 'license' ? 'Licence update (already approved driver)'
+                : updateKind === 'vehicle' ? 'Vehicle change (already approved driver)'
+                : 'Full application'
+              } />
               <Detail icon={<Shield size={11} />} label="Status" value={STATUS_LABEL[status]} />
             </div>
           </div>
@@ -902,9 +986,10 @@ const DriverCard: React.FC<{
   const vehicle = getVehicle(driver);
   const served = getServedCabtypes(vehicle);
   const title = getVehicleTitle(driver);
+  const updateKind = getUpdateKind(driver);
 
   return (
-    <div className="dv-card" onClick={onClick}>
+    <div className={`dv-card${updateKind && status === 'pending' ? ' dv-card-update' : ''}`} onClick={onClick}>
       {/* Avatar */}
       <div className="dv-card-avatar">
         {initials}
@@ -926,6 +1011,7 @@ const DriverCard: React.FC<{
               <KeyRound size={11} /> Not the owner
             </span>
           )}
+          <LicenceExpiryChip expiry={getLicenceExpiry(driver)} />
         </div>
         <ServedTypes served={served} compact />
       </div>
@@ -933,6 +1019,7 @@ const DriverCard: React.FC<{
       {/* Badge */}
       <div className="dv-card-right">
         <AppStatusBadge status={status} small />
+        {updateKind && <UpdateKindBadge kind={updateKind} pending={status === 'pending'} small />}
         <LiveBadge presence={presence} liveRide={liveRide} small />
         <ChevronRight size={16} style={{ color: 'var(--text-secondary)', marginTop: '0.4rem' }} />
       </div>

@@ -42,6 +42,13 @@ export interface DriverApplicationFields {
   licenseImg?: string;
   /** Licence back — absent on applications submitted before it was asked. */
   licenseBackImg?: string;
+  /** "YYYY-MM-DD"; absent on applications from before 2026-11-18. */
+  licenseExpiry?: string;
+  /**
+   * "license" | "vehicle" when an approved driver resubmitted only that part;
+   * "" (or absent) for a whole application.
+   */
+  updateKind?: string;
   vehicleImages?: string[];
   /** In the applicant's name when they own the vehicle, else in the owner's. */
   registrationImg?: string;
@@ -206,6 +213,67 @@ export const getVehicleImages = (a: DriverApplicationFields): string[] => {
 export const getDocumentCount = (a: DriverApplicationFields): number =>
   (getLicenceImg(a) ? 1 : 0) + (getLicenceBackImg(a) ? 1 : 0) + (getRegistrationImg(a) ? 1 : 0) +
   (getCnicImg(a) ? 1 : 0) + getVehicleImages(a).length;
+
+// ─── Licence expiry ──────────────────────────────────────────────────────────
+
+/** Days of notice before an expiry is flagged alongside an already-expired one. */
+export const LICENCE_EXPIRY_WARN_DAYS = 30;
+
+export type LicenceExpiryState = 'missing' | 'invalid' | 'expired' | 'soon' | 'ok';
+
+export interface LicenceExpiry {
+  state: LicenceExpiryState;
+  /** "18 Nov 2027"; the raw value when it isn't a date; "" when missing. */
+  label: string;
+  /** Whole days from today — negative once passed; null unless a valid date. */
+  days: number | null;
+}
+
+/**
+ * The app stores a calendar date with no time zone, so it is read as a local
+ * date: a licence expiring "2026-11-18" is still valid on the 18th.
+ */
+export const getLicenceExpiry = (a: DriverApplicationFields, now = new Date()): LicenceExpiry => {
+  const raw = clean(a.licenseExpiry);
+  if (!raw) return { state: 'missing', label: '', days: null };
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  const [y, mo, d] = m ? [Number(m[1]), Number(m[2]) - 1, Number(m[3])] : [0, 0, 0];
+  const date = new Date(y, mo, d);
+  // also rejects dates that roll over, e.g. "2027-02-31"
+  if (!m || date.getMonth() !== mo || date.getDate() !== d) return { state: 'invalid', label: raw, days: null };
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  // rounded: a DST change makes the gap between two midnights 23 or 25 hours
+  const days = Math.round((date.getTime() - today.getTime()) / 86_400_000);
+  return {
+    state: days < 0 ? 'expired' : days <= LICENCE_EXPIRY_WARN_DAYS ? 'soon' : 'ok',
+    label: date.toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' }),
+    days,
+  };
+};
+
+/** "expired 3 days ago", "expires today", "in 12 days". */
+export const licenceExpiryRelative = ({ days }: LicenceExpiry): string => {
+  if (days === null) return '';
+  if (days === 0) return 'expires today';
+  const n = Math.abs(days);
+  const span = `${n} ${n === 1 ? 'day' : 'days'}`;
+  return days < 0 ? `expired ${span} ago` : `in ${span}`;
+};
+
+// ─── Re-verification ─────────────────────────────────────────────────────────
+
+/** What an approved driver resubmitted; `null` for a whole application. */
+export type UpdateKind = 'license' | 'vehicle';
+
+export const getUpdateKind = (a: DriverApplicationFields): UpdateKind | null => {
+  const raw = (a.updateKind || '').toLowerCase().trim();
+  return raw === 'license' || raw === 'vehicle' ? raw : null;
+};
+
+export const UPDATE_KIND_LABEL: Record<UpdateKind, string> = {
+  license: 'New licence',
+  vehicle: 'New vehicle',
+};
 
 // ─── Vehicle ownership ───────────────────────────────────────────────────────
 

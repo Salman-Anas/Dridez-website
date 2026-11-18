@@ -15,6 +15,7 @@ import { RecoverData } from './pages/RecoverData';
 import { PrivacyPolicy } from './pages/PrivacyPolicy';
 import { Login } from './pages/Login';
 import { Tasks } from './pages/Tasks';
+import { Graphs } from './pages/Graphs';
 
 function App() {
   return (
@@ -36,6 +37,7 @@ function App() {
             <Route path="support-chat" element={<SupportChat />} />
             <Route path="settings" element={<Settings />} />
             <Route path="tasks" element={<Tasks />} />
+            <Route path="graphs" element={<Graphs />} />
           </Route>
         </Routes>
       </BrowserRouter>

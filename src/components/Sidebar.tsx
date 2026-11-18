@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Car, Settings, CreditCard, Navigation,
-  LogOut, CheckSquare, LifeBuoy, Wallet, X, MessagesSquare,
+  LogOut, CheckSquare, LifeBuoy, Wallet, X, MessagesSquare, ChartSpline,
 } from 'lucide-react';
 import { logoutAdmin } from '../utils/auth';
 import { useAdminAuth } from '../utils/adminAuthContext';
@@ -17,6 +17,7 @@ const LINKS = [
   { to: '/support-chat', label: 'Support Chat', Icon: MessagesSquare },
   { to: '/tickets', label: 'Support Tickets', Icon: LifeBuoy },
   { to: '/tasks', label: 'Tasks', Icon: CheckSquare },
+  { to: '/graphs', label: 'Graphs', Icon: ChartSpline },
 ];
 
 interface Props {

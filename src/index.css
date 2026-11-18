@@ -4738,6 +4738,137 @@ body {
 
 .dv-ownership .verify-hint { margin: 0; }
 
+/* Re-verification: an approved driver resubmitted only their licence or only
+   their vehicle. Violet so it reads apart from pending (cyan), warnings
+   (amber) and rejection (red). */
+.dv-update-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border-radius: 20px;
+  padding: 0.2rem 0.65rem;
+  white-space: nowrap;
+  background: var(--accent-purple);
+  color: #fff;
+  border: 1px solid var(--accent-purple);
+}
+
+.dv-update-badge-sm { font-size: 0.68rem; padding: 0.14rem 0.5rem; margin-top: 0.3rem; }
+
+/* already decided — kept as a record of what the last submission changed */
+.dv-update-badge-muted {
+  background: rgba(124, 58, 237, 0.08);
+  color: var(--accent-purple);
+  border-color: rgba(124, 58, 237, 0.22);
+  font-weight: 600;
+}
+
+.dv-card.dv-card-update { border-left: 3px solid var(--accent-purple); }
+
+.dv-update-callout {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.8rem 0.9rem;
+  margin-bottom: 1.25rem;
+  border: 1px solid var(--accent-purple);
+  border-left-width: 3px;
+  border-radius: 10px;
+  background: rgba(124, 58, 237, 0.06);
+  color: var(--accent-purple);
+}
+
+.dv-update-callout strong {
+  display: block;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.dv-update-callout p { margin: 0.3rem 0 0; font-size: 0.86rem; color: var(--text-primary); }
+
+/* The part of the application that changed in this submission */
+.dv-doc-block + .dv-doc-block { margin-top: 1.1rem; }
+
+.dv-changed {
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(124, 58, 237, 0.4);
+  border-radius: 10px;
+  background: rgba(124, 58, 237, 0.04);
+}
+
+.modal-section.dv-section-changed {
+  border-color: rgba(124, 58, 237, 0.4);
+  background: rgba(124, 58, 237, 0.04);
+}
+
+.dv-changed-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-left: 0.35rem;
+  padding: 0.08rem 0.45rem;
+  border-radius: 20px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--accent-purple);
+  color: #fff;
+}
+
+/* Licence expiry — red once expired or within 30 days of it */
+.dv-expiry {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  font-size: 0.84rem;
+  color: var(--text-primary);
+}
+
+.dv-expiry > svg { color: var(--text-secondary); }
+.dv-expiry-label { color: var(--text-secondary); font-size: 0.78rem; }
+.dv-expiry-rel { color: var(--text-secondary); font-size: 0.8rem; }
+.dv-expiry-missing strong, .dv-expiry-invalid strong { color: var(--text-secondary); font-weight: 600; }
+.dv-expiry-invalid { border-color: rgba(217, 119, 6, 0.35); }
+
+.dv-expiry-expired, .dv-expiry-soon {
+  border-color: var(--accent-red);
+  background: rgba(220, 38, 38, 0.07);
+}
+
+.dv-expiry-expired > svg, .dv-expiry-soon > svg,
+.dv-expiry-expired strong, .dv-expiry-soon strong,
+.dv-expiry-expired .dv-expiry-rel, .dv-expiry-soon .dv-expiry-rel { color: var(--accent-red); font-weight: 700; }
+
+.dv-expiry-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 0.15rem 0.6rem;
+}
+
+.dv-expiry-chip.dv-expiry-missing { font-style: italic; }
+
+.dv-expiry-chip.dv-expiry-flag {
+  font-weight: 700;
+  color: var(--accent-red);
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.3);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
  * Portal shell, Dridez theme and mobile layout.
  *
@@ -6226,3 +6357,307 @@ a.dv-revoke-btn {
   align-items: center;
   gap: 4px;
 }
+
+/* ── Graphs: test rates vs a fare curve ──────────────────────────────────── */
+
+.gr-page { --gr-test: #1f4ed8; --gr-curve: #d97706; }
+
+.gr-card {
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 18px 20px;
+  box-shadow: var(--glass-shadow);
+}
+
+.gr-card h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.gr-muted { color: var(--text-secondary); font-size: 0.85rem; }
+.gr-warn { color: var(--accent-orange); }
+
+.gr-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  background: var(--surface-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.gr-icon-btn:hover:not(:disabled) { color: var(--text-primary); border-color: #c3cddc; }
+.gr-icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.gr-icon-btn-sm { width: 26px; height: 26px; border-radius: 7px; }
+
+.gr-danger-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid #f3c4c4;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--accent-red);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.gr-danger-btn:hover:not(:disabled) { background: #fdf2f2; }
+
+/* Region list */
+.gr-new-region {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 1.25rem;
+  color: var(--text-secondary);
+}
+.gr-new-region .form-input { flex: 1; min-width: 0; }
+
+.gr-regions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.gr-region-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.gr-region-card:hover { border-color: #c3cddc; box-shadow: 0 4px 14px rgba(11, 21, 48, 0.08); }
+.gr-region-name { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 1rem; }
+.gr-region-name svg { color: var(--brand); }
+.gr-region-meta, .gr-region-curve, .gr-region-error { font-size: 0.85rem; color: var(--text-secondary); }
+.gr-region-error strong { color: var(--text-primary); }
+
+.gr-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 56px 20px;
+  border: 1px dashed var(--border-color);
+  border-radius: 14px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+.gr-empty h3 { margin: 4px 0 0; color: var(--text-primary); }
+.gr-empty p { margin: 0 0 10px; font-size: 0.9rem; }
+
+/* Region detail */
+.gr-region { display: flex; flex-direction: column; gap: 16px; }
+.gr-region > .rate-alert { margin-bottom: 0; }
+.gr-alert-close { margin-left: auto; }
+
+.gr-region-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.gr-region-head h1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 1.6rem;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+.gr-rename { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.gr-rename .form-input { max-width: 420px; font-size: 1.05rem; font-weight: 600; }
+
+.gr-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 16px;
+  align-items: start;
+}
+
+.gr-chart-card { padding: 14px 14px 8px; }
+.gr-chart { position: relative; }
+.gr-chart svg { display: block; touch-action: none; }
+
+.gr-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding: 0 4px 6px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+.gr-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+
+.gr-key { display: inline-block; width: 14px; flex-shrink: 0; }
+.gr-key-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--gr-test); margin: 0 2.5px; }
+.gr-key-line { height: 2px; border-radius: 1px; background: var(--gr-curve); }
+.gr-key-gap { height: 0; border-top: 1.5px dashed #94a3b8; }
+
+.gr-grid { stroke: #edf1f6; stroke-width: 1; }
+.gr-axis { stroke: #c9d2df; stroke-width: 1; }
+.gr-tick { fill: var(--text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.gr-axis-title { fill: var(--text-secondary); font-size: 11.5px; font-weight: 600; }
+.gr-threshold { stroke: #b6c2d3; stroke-width: 1; stroke-dasharray: 3 4; }
+.gr-gap { stroke: #94a3b8; stroke-width: 1.5; stroke-dasharray: 2 3; }
+.gr-curve { fill: none; stroke: var(--gr-curve); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.gr-curve-dot { fill: var(--gr-curve); stroke: var(--surface-color); stroke-width: 2; }
+.gr-crosshair { stroke: #94a3b8; stroke-width: 1; }
+.gr-dot {
+  fill: var(--gr-test);
+  stroke: var(--surface-color);
+  stroke-width: 2;
+  cursor: default;
+  transition: r 0.12s;
+  outline: none;
+}
+.gr-dot:focus-visible { stroke: var(--text-primary); }
+
+.gr-chart-empty {
+  position: absolute;
+  inset: 40% 0 auto;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  pointer-events: none;
+}
+
+.gr-tip {
+  position: absolute;
+  z-index: 2;
+  min-width: 170px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface-color);
+  box-shadow: 0 6px 20px rgba(11, 21, 48, 0.12);
+  font-size: 0.8rem;
+  pointer-events: none;
+}
+.gr-tip-head { margin-bottom: 4px; color: var(--text-secondary); font-weight: 600; }
+.gr-tip-row { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.gr-tip-row strong { font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.gr-tip-row span:last-child { color: var(--text-secondary); }
+
+/* Curve inputs */
+.gr-curve-card { display: flex; flex-direction: column; gap: 14px; }
+.gr-curve-fields { display: flex; flex-direction: column; gap: 12px; }
+.gr-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.gr-field-label { font-size: 0.82rem; font-weight: 600; }
+.gr-field-label em { font-style: normal; font-weight: 400; color: var(--text-secondary); }
+.gr-field-hint { font-size: 0.76rem; color: var(--text-secondary); }
+.gr-input-bad { border-color: var(--accent-red); }
+.gr-input-bad + .gr-field-hint { color: var(--accent-red); }
+.gr-formula { margin: 0; padding: 8px 10px; line-height: 1.5; }
+.gr-curve-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.gr-curve-card .gr-muted { margin: -6px 0 0; font-size: 0.78rem; }
+
+/* Error summary */
+.gr-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+}
+.gr-stats > .gr-muted { margin: 0; grid-column: 1 / -1; }
+.gr-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--surface-color);
+}
+.gr-stat span { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); }
+.gr-stat strong { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+.gr-stat em { font-style: normal; font-size: 0.76rem; color: var(--text-secondary); }
+
+/* Test rates */
+.gr-points-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+.gr-count {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg-color);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.gr-add {
+  display: grid;
+  grid-template-columns: 130px 130px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+.gr-add-btn { height: 41px; }
+
+.gr-paste { display: flex; flex-direction: column; gap: 10px; }
+.gr-paste textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85rem; }
+.gr-paste-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+.gr-table-wrap { margin-top: 16px; overflow-x: auto; }
+.gr-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.gr-table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+.gr-table td { padding: 7px 10px; border-bottom: 1px solid #f0f3f8; white-space: nowrap; }
+.gr-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.gr-table tbody tr:hover { background: #fafbfd; }
+.gr-table .gr-label { white-space: normal; max-width: 220px; overflow-wrap: anywhere; }
+.gr-table .form-input { padding: 6px 8px; min-width: 80px; }
+.gr-row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.gr-table-note { margin: 10px 0 0; font-size: 0.78rem; }
+
+@media (max-width: 1000px) {
+  .gr-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .gr-add { grid-template-columns: 1fr 1fr; }
+  .gr-field-wide { grid-column: 1 / -1; }
+  .gr-add-btn { grid-column: 1 / -1; }
+  .gr-new-region { flex-wrap: wrap; }
+  .gr-new-region .form-input { flex-basis: calc(100% - 30px); }
+  .gr-region-head h1 { font-size: 1.3rem; }
+  .gr-card { padding: 14px; }
+}
+
+/* Graphs: cuts in the fare curve */
+.gr-cuts { display: flex; flex-direction: column; gap: 10px; }
+.gr-cut {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-color);
+}
+.gr-cut-head { display: flex; align-items: center; justify-content: space-between; }
+.gr-cut-head > span { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 700; }
+.gr-cut-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.gr-cut .form-input { background: var(--surface-color); }
+.gr-hint-bad { color: var(--accent-red); }
+
+ul.gr-formula { list-style: none; display: flex; flex-direction: column; gap: 3px; font-size: 0.8rem; }
+ul.gr-formula li { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+ul.gr-formula em { font-style: normal; color: var(--text-secondary); }
