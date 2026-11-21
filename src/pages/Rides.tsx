@@ -76,6 +76,8 @@ interface Ride {
   seats?: number;
   seatsLeft?: number;
   farePerSeat?: number;
+  /** The whole car; seats sell as a share of it (trips posted since 2026-11-20). */
+  fullFare?: number;
   driverName?: string;
   driverPhone?: string;
   vehicle?: string;
@@ -255,6 +257,7 @@ const isCityToCity = (ride: Ride) => ride.source === 'citytocity' || ride.source
 
 const fareText = (ride: Ride): string => {
   if (ride.source === 'drivertrip') {
+    if (Number(ride.fullFare) > 0) return `${formatPKR(Number(ride.fullFare))} full car`;
     return ride.farePerSeat != null ? `${formatPKR(Number(ride.farePerSeat))} / seat` : '—';
   }
   return ride.price != null ? formatPKR(Number(ride.price)) : '—';

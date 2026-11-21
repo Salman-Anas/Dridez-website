@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Car, Settings, CreditCard, Navigation,
-  LogOut, CheckSquare, LifeBuoy, Wallet, X, MessagesSquare, ChartSpline,
+  LogOut, CheckSquare, LifeBuoy, Wallet, X, MessagesSquare, ChartSpline, MapPinned,
 } from 'lucide-react';
 import { logoutAdmin } from '../utils/auth';
 import { useAdminAuth } from '../utils/adminAuthContext';
@@ -13,6 +13,7 @@ const LINKS = [
   { to: '/drivers', label: 'Drivers', Icon: Car },
   { to: '/users', label: 'Users', Icon: Users },
   { to: '/payments', label: 'Payments', Icon: CreditCard },
+  { to: '/fares', label: 'District Fares', Icon: MapPinned },
   { to: '/driver-accounts', label: 'Driver Accounts', Icon: Wallet },
   { to: '/support-chat', label: 'Support Chat', Icon: MessagesSquare },
   { to: '/tickets', label: 'Support Tickets', Icon: LifeBuoy },

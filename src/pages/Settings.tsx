@@ -445,6 +445,17 @@ export const Settings: React.FC = () => {
         </div>
       ) : (
         <>
+          <div className="rate-alert rate-alert-warn">
+            <AlertCircle size={20} />
+            <div>
+              <strong>Fares are now set per district</strong>
+              <p>
+                Set prices on <a href="/fares">District Fares</a>. The rates on this page are only used for
+                anything the national fare there doesn't set, and by older app versions.
+              </p>
+            </div>
+          </div>
+
           {/* Anything unbookable is the first thing an admin needs to see */}
           {broken.length > 0 && (
             <div className="rate-alert rate-alert-error">
